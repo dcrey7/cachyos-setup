@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # CachyOS / KDE Plasma 6 desktop tweaks:
-#   - Taskbar flush with bottom, height 52
 #   - macOS WhiteSur-Dark window decoration with traffic-light buttons on the RIGHT
 #   - Magic Lamp minimize animation
 #   - Auto-patch VSCode to use native title bar (if installed)
+#
+# (Panel size/floating is left alone -- tweak that via Plasma's GUI:
+#  right-click panel -> Panel Configuration -> drag the top edge to resize,
+#  or use the "More Options" menu in edit mode for the Floating toggle.)
 #
 # Idempotent. Run again safely. Wayland-aware (Plasma 6 / KWin Wayland tested).
 set -euo pipefail
@@ -11,7 +14,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # 0. Sanity checks
 # ---------------------------------------------------------------------------
-echo "==> 0/7  Sanity checks"
+echo "==> 0/6  Sanity checks"
 
 if [[ "${XDG_CURRENT_DESKTOP:-}" != *KDE* ]]; then
   echo "    ERROR: This script targets KDE Plasma. XDG_CURRENT_DESKTOP='${XDG_CURRENT_DESKTOP:-}'." >&2
@@ -41,24 +44,22 @@ echo "    All required tools present (kwriteconfig6, qdbus6, paru)."
 # ---------------------------------------------------------------------------
 # 1. Back up config so uninstall can restore exactly
 # ---------------------------------------------------------------------------
-echo "==> 1/7  Backup current config"
+echo "==> 1/6  Backup current config"
 ts="$(date +%Y%m%d-%H%M%S)"
-backup_dir="$HOME/.config/cachy-desktop-backup-$ts"
+backup_dir="$HOME/.config/cachyos-setup-backup-$ts"
 mkdir -p "$backup_dir"
-for f in kwinrc plasma-org.kde.plasma.desktop-appletsrc; do
-  if [[ -f "$HOME/.config/$f" ]]; then
-    cp "$HOME/.config/$f" "$backup_dir/$f"
-    echo "    Backed up $f -> $backup_dir/$f"
-  fi
-done
-# Marker file uninstall.sh will look for to find the latest backup
-ln -sfn "$backup_dir" "$HOME/.config/cachy-desktop-backup-latest"
-echo "    Latest backup symlinked at ~/.config/cachy-desktop-backup-latest"
+if [[ -f "$HOME/.config/kwinrc" ]]; then
+  cp "$HOME/.config/kwinrc" "$backup_dir/kwinrc"
+  echo "    Backed up kwinrc -> $backup_dir/kwinrc"
+fi
+# Marker symlink uninstall.sh follows to find the latest backup
+ln -sfn "$backup_dir" "$HOME/.config/cachyos-setup-backup-latest"
+echo "    Latest backup symlinked at ~/.config/cachyos-setup-backup-latest"
 
 # ---------------------------------------------------------------------------
 # 2. Install WhiteSur KDE theme via AUR
 # ---------------------------------------------------------------------------
-echo "==> 2/7  WhiteSur-kde theme"
+echo "==> 2/6  WhiteSur-kde theme"
 if pacman -Qi whitesur-kde-theme >/dev/null 2>&1; then
   echo "    Already installed (pacman db)."
   echo "installed_by_us=0" > "$backup_dir/whitesur.state"
@@ -77,7 +78,7 @@ fi
 # ---------------------------------------------------------------------------
 # 3. Window decoration: WhiteSur-Dark with buttons on the right
 # ---------------------------------------------------------------------------
-echo "==> 3/7  Window decoration (WhiteSur-Dark, buttons on right)"
+echo "==> 3/6  Window decoration (WhiteSur-Dark, buttons on right)"
 kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key library  "org.kde.kwin.aurorae"
 kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key theme    "__aurorae__svg__WhiteSur-dark"
 # Layout: M (app menu) on the left, I=minimize A=maximize X=close on the right.
@@ -89,7 +90,7 @@ echo "    Aurorae theme + button layout written to ~/.config/kwinrc"
 # ---------------------------------------------------------------------------
 # 4. Magic Lamp minimize effect
 # ---------------------------------------------------------------------------
-echo "==> 4/7  Magic Lamp minimize effect"
+echo "==> 4/6  Magic Lamp minimize effect"
 kwriteconfig6 --file kwinrc --group "Plugins" --key magiclampEnabled         --type bool true
 kwriteconfig6 --file kwinrc --group "Plugins" --key minimizeanimationEnabled --type bool false
 echo "    Magic Lamp enabled, default minimize animation disabled"
@@ -97,7 +98,7 @@ echo "    Magic Lamp enabled, default minimize animation disabled"
 # ---------------------------------------------------------------------------
 # 5. Reload KWin so decoration + effects take effect (Wayland-safe)
 # ---------------------------------------------------------------------------
-echo "==> 5/7  Reloading KWin config"
+echo "==> 5/6  Reloading KWin config"
 if qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1; then
   echo "    KWin reconfigured."
 else
@@ -105,29 +106,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 6. Panel: flush with bottom, height 52
+# 6. Per-app: VSCode native title bar (only if VSCode is installed)
 # ---------------------------------------------------------------------------
-echo "==> 6/7  Panel (floating=false, height=52)"
-# Plasma 6 scripting API — the only reliable way while plasmashell is running.
-script='
-  var ids = panelIds;
-  for (var i = 0; i < ids.length; i++) {
-    var p = panelById(ids[i]);
-    p.floating = false;
-    p.height   = 52;
-  }
-'
-if qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript "$script" >/dev/null 2>&1; then
-  echo "    Panel(s) updated via PlasmaShell scripting API."
-else
-  echo "    WARNING: evaluateScript failed. plasmashell may not be running, or" >&2
-  echo "             your panel may need a logout/login cycle to pick this up." >&2
-fi
-
-# ---------------------------------------------------------------------------
-# 7. Per-app: VSCode native title bar (only if VSCode is installed)
-# ---------------------------------------------------------------------------
-echo "==> 7/7  Per-app title-bar tweaks"
+echo "==> 6/6  Per-app title-bar tweaks"
 vscode_settings="$HOME/.config/Code/User/settings.json"
 if [[ -d "$HOME/.config/Code" ]]; then
   mkdir -p "$(dirname "$vscode_settings")"
@@ -172,7 +153,7 @@ echo ""
 echo "  Electron apps (Discord, Slack, Spotify) typically can't be changed."
 echo ""
 echo "If the title bar doesn't change on already-open windows, close and"
-echo "reopen them — KWin only re-decorates on next map. If decoration still"
+echo "reopen them -- KWin only re-decorates on next map. If decoration still"
 echo "looks like the default, open:"
 echo "  System Settings -> Window Decorations -> Apply"
 echo "(KDE sometimes needs one manual click to fully commit the change.)"
