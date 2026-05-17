@@ -19,6 +19,16 @@ KWin.TabBoxSwitcher {
     id: tabBox
     currentIndex: thumbnailView ? thumbnailView.currentIndex : -1
     readonly property int panelReserve: 40
+    property bool fadeInStarted: false
+
+    function restartFadeIn() {
+        fadeInStarted = false
+        Qt.callLater(function() {
+            if (tabBox.visible) {
+                fadeInStarted = true
+            }
+        })
+    }
 
     Window {
         id: window
@@ -36,19 +46,20 @@ KWin.TabBoxSwitcher {
         color: "transparent"
 
         Component.onCompleted: {
-            console.log("coverswitch_g19 screenGeometry:",
+            tabBox.restartFadeIn()
+            console.log("coverswitch_g21 screenGeometry:",
                         tabBox.screenGeometry.x,
                         tabBox.screenGeometry.y,
                         tabBox.screenGeometry.width,
                         tabBox.screenGeometry.height)
-            console.log("coverswitch_g19 Screen:",
+            console.log("coverswitch_g21 Screen:",
                         "width", Screen.width,
                         "height", Screen.height,
                         "virtualX", Screen.virtualX,
                         "virtualY", Screen.virtualY,
                         "desktopAvailableWidth", Screen.desktopAvailableWidth,
                         "desktopAvailableHeight", Screen.desktopAvailableHeight)
-            console.log("coverswitch_g19 windowGeometry:",
+            console.log("coverswitch_g21 windowGeometry:",
                         window.x,
                         window.y,
                         window.width,
@@ -76,50 +87,62 @@ KWin.TabBoxSwitcher {
             }
         }
 
-        Rectangle {
-            x: 0
-            y: 0
-            width: Screen.width
-            height: Screen.height
-            color: "black"
-            opacity: 0.12
-            z: -9
-        }
-
         Item {
-            id: scene
-            anchors {
-                left: parent.left
-                right: parent.right
-                top: parent.top
+            id: fader
+            anchors.fill: parent
+            opacity: tabBox.visible && tabBox.fadeInStarted ? 1 : 0
+
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: 160
+                    easing.type: Easing.OutCubic
+                }
             }
-            height: parent.height
-            Accessible.name: thumbnailView.currentItem ? thumbnailView.currentItem.caption : ""
 
-            PathView {
-                id: thumbnailView
+            Rectangle {
+                x: 0
+                y: 0
+                width: Screen.width
+                height: Screen.height
+                color: "black"
+                opacity: 0.12
+                z: -9
+            }
 
-                readonly property int visibleCount: Math.min(count, pathItemCount)
-                readonly property real previewRatio: 0.45
-                readonly property int boxWidth: Math.round(width * previewRatio)
-                readonly property int boxHeight: Math.round(height * previewRatio)
-                readonly property real centerY: height * 0.48
-                readonly property real leftOuterX: width * 0.40
-                readonly property real leftMiddleX: width * 0.43
-                readonly property real leftInnerX: width * 0.46
-                readonly property real centerX: width * 0.5
-                readonly property real rightInnerX: width * 0.54
-                readonly property real rightMiddleX: width * 0.57
-                readonly property real rightOuterX: width * 0.60
+            Item {
+                id: scene
+                anchors {
+                    left: parent.left
+                    right: parent.right
+                    top: parent.top
+                }
+                height: parent.height
+                Accessible.name: thumbnailView.currentItem ? thumbnailView.currentItem.caption : ""
 
-                focus: true
-                anchors.fill: parent
+                PathView {
+                    id: thumbnailView
 
-                preferredHighlightBegin: 0.5
-                preferredHighlightEnd: 0.5
-                highlightRangeMode: PathView.StrictlyEnforceRange
-                highlightMoveDuration: 300
-                pathItemCount: 7
+                    readonly property int visibleCount: Math.min(count, pathItemCount)
+                    readonly property real previewRatio: 0.45
+                    readonly property int boxWidth: Math.round(width * previewRatio)
+                    readonly property int boxHeight: Math.round(height * previewRatio)
+                    readonly property real centerY: height * 0.48
+                    readonly property real leftOuterX: width * 0.40
+                    readonly property real leftMiddleX: width * 0.43
+                    readonly property real leftInnerX: width * 0.46
+                    readonly property real centerX: width * 0.5
+                    readonly property real rightInnerX: width * 0.54
+                    readonly property real rightMiddleX: width * 0.57
+                    readonly property real rightOuterX: width * 0.60
+
+                    focus: true
+                    anchors.fill: parent
+
+                    preferredHighlightBegin: 0.5
+                    preferredHighlightEnd: 0.5
+                    highlightRangeMode: PathView.StrictlyEnforceRange
+                    highlightMoveDuration: 220
+                    pathItemCount: 7
 
                 path: Path {
                     startX: thumbnailView.leftOuterX
@@ -258,6 +281,7 @@ KWin.TabBoxSwitcher {
                 visible: thumbnailView.count === 0
             }
         }
+        }
 
         onSceneGraphError: () => {
         }
@@ -282,9 +306,13 @@ KWin.TabBoxSwitcher {
     }
 
     onVisibleChanged: {
-        if (!visible) {
+        if (visible) {
+            window.visible = true
+            restartFadeIn()
+        } else {
+            fadeInStarted = false
             thumbnailView.currentIndex = 0
+            window.visible = false
         }
-        window.visible = visible
     }
 }
