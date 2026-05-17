@@ -3,6 +3,9 @@
 #   - Taskbar: flush with bottom, height 40
 #   - WhiteSur-Dark window decoration, traffic-light buttons on the RIGHT
 #   - Magic Lamp minimize effect (700ms duration, independent of global anim speed)
+#   - Eye candy: Wobbly Windows (drag), Glide (open), Sheet (dialogs)
+#   - Fade Desktop animation when switching virtual desktops (replaces Slide)
+#   - Cube effect via kdeplasma-addons (Meta+C to activate)
 #   - Battery applet: show percentage on icon, force always-visible in tray
 #   - Auto-patch VSCode to use native title bar (if installed)
 #
@@ -75,19 +78,48 @@ kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key ButtonsOnRight 
 echo "    WhiteSur-dark; menu on left, min/max/close on right"
 
 # ---------------------------------------------------------------------------
-echo "==> 4/7  Magic Lamp minimize effect (700ms)"
-# Plasma 6 default minimize effect is "squash", not the old "minimizeanimation".
+echo "==> 4/7  KWin effects (Magic Lamp + Wobbly/Glide/Sheet + Fade Desktop + Cube)"
+
+# Make sure kdeplasma-addons is installed (it provides the Cube effect on
+# Plasma 6 -- the classic one was removed and rewritten as a QML addon).
+if pacman -Qi kdeplasma-addons >/dev/null 2>&1; then
+  echo "    kdeplasma-addons already installed."
+  echo "installed_by_us=0" > "$backup_dir/kdeplasma-addons.state"
+else
+  echo "    Installing kdeplasma-addons (brings the Cube effect)..."
+  sudo pacman -S --needed --noconfirm kdeplasma-addons
+  echo "installed_by_us=1" > "$backup_dir/kdeplasma-addons.state"
+fi
+
+# Minimize: Plasma 6 default is "squash". Swap to Magic Lamp.
 kwriteconfig6 --file kwinrc --group "Plugins" --key squashEnabled    --type bool false
 kwriteconfig6 --file kwinrc --group "Plugins" --key magiclampEnabled --type bool true
-# Fixed 700ms; doesn't scale with global AnimationDurationFactor.
+# Magic Lamp duration: fixed 700ms, doesn't scale with AnimationDurationFactor.
 kwriteconfig6 --file kwinrc --group "Effect-magiclamp" --key AnimationDuration 700
 
-# `KWin reconfigure` rereads kwinrc but does NOT load/unload effects on Wayland.
-# We have to swap them explicitly via the Effects D-Bus interface.
+# Window eye candy.
+kwriteconfig6 --file kwinrc --group "Plugins" --key wobblywindowsEnabled --type bool true
+kwriteconfig6 --file kwinrc --group "Plugins" --key glideEnabled         --type bool true
+kwriteconfig6 --file kwinrc --group "Plugins" --key sheetEnabled         --type bool true
+
+# Virtual desktop switching: prefer Fade over the default Slide. Both are
+# built-in and only one can be active at a time.
+kwriteconfig6 --file kwinrc --group "Plugins" --key slideEnabled       --type bool false
+kwriteconfig6 --file kwinrc --group "Plugins" --key fadedesktopEnabled --type bool true
+
+# Cube (Meta+C activates it). Built-in once kdeplasma-addons is installed.
+kwriteconfig6 --file kwinrc --group "Plugins" --key cubeEnabled --type bool true
+
+# `KWin reconfigure` rereads kwinrc but does NOT load/unload effects on
+# Wayland -- we have to swap them explicitly via the Effects D-Bus interface.
 qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
-qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect squash    >/dev/null 2>&1 || true
-qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect   magiclamp >/dev/null 2>&1 || true
-echo "    squash unloaded, magiclamp loaded (700ms genie)"
+for effect_off in squash slide; do
+  qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect "$effect_off" >/dev/null 2>&1 || true
+done
+for effect_on in magiclamp wobblywindows glide sheet fadedesktop cube; do
+  qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect "$effect_on" >/dev/null 2>&1 || true
+done
+echo "    Effects loaded: magiclamp(700ms), wobbly, glide, sheet, fadedesktop, cube"
 
 # ---------------------------------------------------------------------------
 echo "==> 5/7  Panel: flush + height 40 + battery percentage"

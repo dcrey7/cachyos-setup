@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Reverses cachyos-setup install.sh tweaks:
 #   - Restores kwinrc + plasma-org.kde.plasma.desktop-appletsrc from backup
-#   - Unloads magiclamp, reloads squash (Plasma 6 default minimize effect)
+#   - Unloads our effects, reloads Plasma 6 defaults (squash + slide)
 #   - Restores VSCode settings.json if patched
-#   - Removes WhiteSur-kde theme if WE installed it
+#   - Removes WhiteSur-kde theme + kdeplasma-addons if WE installed them
 set -euo pipefail
 
 backup_link="$HOME/.config/cachyos-setup-backup-latest"
@@ -34,7 +34,8 @@ else
   for key in library theme ButtonsOnLeft ButtonsOnRight; do
     kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key "$key" --delete || true
   done
-  for key in magiclampEnabled squashEnabled; do
+  for key in magiclampEnabled squashEnabled wobblywindowsEnabled glideEnabled \
+             sheetEnabled slideEnabled fadedesktopEnabled cubeEnabled; do
     kwriteconfig6 --file kwinrc --group "Plugins" --key "$key" --delete || true
   done
   kwriteconfig6 --file kwinrc --group "Effect-magiclamp" --key AnimationDuration --delete || true
@@ -42,12 +43,16 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 2/5  Reload KWin + swap effects back"
+echo "==> 2/5  Reload KWin + swap effects back to Plasma 6 defaults"
 if command -v qdbus6 >/dev/null 2>&1; then
   qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
-  qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect magiclamp >/dev/null 2>&1 || true
-  qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect   squash    >/dev/null 2>&1 || true
-  echo "    KWin: magiclamp unloaded, squash loaded"
+  for off in magiclamp wobblywindows glide sheet fadedesktop cube; do
+    qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect "$off" >/dev/null 2>&1 || true
+  done
+  for on in squash slide; do
+    qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect "$on" >/dev/null 2>&1 || true
+  done
+  echo "    KWin: extras unloaded, defaults (squash + slide) loaded"
 fi
 
 # ---------------------------------------------------------------------------
@@ -75,18 +80,24 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 5/5  WhiteSur-kde theme"
-state_file="$backup_dir/whitesur.state"
-if [[ -f "$state_file" ]] && grep -q '^installed_by_us=1' "$state_file"; then
-  if pacman -Qi whitesur-kde-theme >/dev/null 2>&1; then
-    echo "    install.sh installed it -- removing via paru..."
-    paru -R --noconfirm whitesur-kde-theme
+echo "==> 5/5  Packages installed by install.sh"
+for pkg_state in whitesur kdeplasma-addons; do
+  case "$pkg_state" in
+    whitesur)         pkg=whitesur-kde-theme  ;;
+    kdeplasma-addons) pkg=kdeplasma-addons    ;;
+  esac
+  sf="$backup_dir/${pkg_state}.state"
+  if [[ -f "$sf" ]] && grep -q '^installed_by_us=1' "$sf"; then
+    if pacman -Qi "$pkg" >/dev/null 2>&1; then
+      echo "    Removing $pkg (install.sh installed it)..."
+      sudo pacman -R --noconfirm "$pkg"
+    else
+      echo "    $pkg: marked as ours but pacman doesn't see it; skipping."
+    fi
   else
-    echo "    Marked as installed by us but pacman doesn't see it; skipping."
+    echo "    $pkg: not installed by us, leaving in place."
   fi
-else
-  echo "    Not installed by us -- leaving it in place."
-fi
+done
 
 # ---------------------------------------------------------------------------
 echo ""
