@@ -175,17 +175,27 @@ KWin.TabBoxSwitcher {
                 Keys.onRightPressed: incrementCurrentIndex()
             }
 
-            PC3.Label {
-                visible: thumbnailView.count > 0
+            Rectangle {
+                id: titlePill
+                visible: thumbnailView.count > 0 && titleLabel.text.length > 0
                 anchors.horizontalCenter: parent.horizontalCenter
-                y: thumbnailView.centerY + thumbnailView.boxHeight * 0.5 + Kirigami.Units.gridUnit * 0.5
-                width: Math.min(implicitWidth, parent.width * 0.72)
-                horizontalAlignment: Text.AlignHCenter
-                font.bold: true; font.pointSize: Math.round(Kirigami.Theme.defaultFont.pointSize * 1.15)
-                color: "white"
-                text: thumbnailView.currentItem && thumbnailView.currentItem.caption ? String(thumbnailView.currentItem.caption) : ""
-                textFormat: Text.PlainText
-                maximumLineCount: 1; elide: Text.ElideMiddle
+                y: thumbnailView.centerY + thumbnailView.boxHeight * 0.5 + Kirigami.Units.gridUnit * 1.2
+                width: Math.min(titleLabel.implicitWidth + Kirigami.Units.gridUnit * 1.5, parent.width * 0.72)
+                height: titleLabel.implicitHeight + Kirigami.Units.smallSpacing * 2
+                radius: height / 2
+                color: Qt.rgba(0, 0, 0, 0.45)
+
+                PC3.Label {
+                    id: titleLabel
+                    anchors.centerIn: parent
+                    width: parent.width - Kirigami.Units.gridUnit * 1.5
+                    horizontalAlignment: Text.AlignHCenter
+                    font.bold: true; font.pointSize: Math.round(Kirigami.Theme.defaultFont.pointSize * 1.15)
+                    color: "white"
+                    text: thumbnailView.currentItem && thumbnailView.currentItem.caption ? String(thumbnailView.currentItem.caption) : ""
+                    textFormat: Text.PlainText
+                    maximumLineCount: 1; elide: Text.ElideMiddle
+                }
             }
 
             Kirigami.PlaceholderMessage {
