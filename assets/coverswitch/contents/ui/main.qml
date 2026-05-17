@@ -54,7 +54,7 @@ KWin.TabBoxSwitcher {
             id: fader
             anchors.fill: parent
             opacity: tabBox.visible && tabBox.fadeInStarted ? 1 : 0
-            Accessible.name: thumbnailView.currentItem ? thumbnailView.currentItem.caption : ""
+            Accessible.name: thumbnailView.currentItem && thumbnailView.currentItem.caption ? String(thumbnailView.currentItem.caption) : ""
 
             Behavior on opacity {
                 NumberAnimation {
@@ -133,7 +133,7 @@ KWin.TabBoxSwitcher {
                     scale: PathView.onPath ? PathView.scale : 0
                     z: PathView.onPath ? Math.round((PathView.progress || 0) * 100) : -1
                     opacity: PathView.onPath ? 1 : 0
-                    Accessible.name: model.caption
+                    Accessible.name: model.caption ? String(model.caption) : ""
 
                     KWin.WindowThumbnail {
                         id: thumbnail
@@ -182,7 +182,7 @@ KWin.TabBoxSwitcher {
                 horizontalAlignment: Text.AlignHCenter
                 font.bold: true; font.pointSize: Math.round(Kirigami.Theme.defaultFont.pointSize * 1.15)
                 color: "white"
-                text: thumbnailView.currentItem ? thumbnailView.currentItem.caption : ""
+                text: thumbnailView.currentItem && thumbnailView.currentItem.caption ? String(thumbnailView.currentItem.caption) : ""
                 textFormat: Text.PlainText
                 maximumLineCount: 1; elide: Text.ElideMiddle
             }
