@@ -59,7 +59,10 @@ KWin.TabBoxSwitcher {
         KWin.DesktopBackground {
             id: desktopBackground
 
-            anchors.fill: parent
+            x: 0
+            y: 0
+            width: Screen.width
+            height: Screen.height
             activity: KWin.Workspace.currentActivity
             outputName: window.screen.name
             z: -10
@@ -74,7 +77,10 @@ KWin.TabBoxSwitcher {
         }
 
         Rectangle {
-            anchors.fill: parent
+            x: 0
+            y: 0
+            width: Screen.width
+            height: Screen.height
             color: "black"
             opacity: 0.12
             z: -9
