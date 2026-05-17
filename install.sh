@@ -122,6 +122,62 @@ done
 echo "    Effects loaded: magiclamp(700ms), wobbly, glide, sheet, fadedesktop, cube"
 
 # ---------------------------------------------------------------------------
+echo "==> 4b/7  Cover Switch + Flip Switch tabbox layouts (rescued from KDE MR !91)"
+#
+# Honest context: the 3D Cover Switch / Flip Switch from KDE 4.x/5.x was REMOVED
+# in Plasma 6 and there is NO replacement in the official KDE Store, AUR, or
+# any community project as of 2026.
+#
+# What we do here: install the QML rewrite that Ismael Asensio wrote in 2021
+# (merge request !91 in kdeplasma-addons -- abandoned, branch deleted upstream,
+# but we rescued the .qml + metadata from the MR patch file). It was written
+# for Plasma 5.24, so it MAY need import tweaks on your specific Plasma 6
+# point release.
+#
+# If after install the layouts don't show up in System Settings -> Task
+# Switcher or KWin throws QML errors, see the diagnostic message at the bottom
+# of this step.
+
+ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/assets"
+TABBOX_DIR="$HOME/.local/share/kwin/tabbox"
+mkdir -p "$TABBOX_DIR"
+
+for layout in coverswitch flipswitch; do
+  src="$ASSETS_DIR/$layout"
+  dest="$TABBOX_DIR/$layout"
+  if [[ ! -d "$src" ]]; then
+    echo "    SKIP  $layout: $src missing (run from inside the cloned repo)"
+    continue
+  fi
+  rm -rf "$dest"
+  mkdir -p "$dest"
+  cp -r "$src"/* "$dest/"
+  echo "    installed $layout -> $dest"
+done
+
+# Set Cover Switch as main Alt+Tab style, Flip Switch as Alt+Shift+Tab alt.
+kwriteconfig6 --file kwinrc --group "TabBox" --key LayoutName "coverswitch"
+kwriteconfig6 --file kwinrc --group "TabBoxAlternative" --key LayoutName "flipswitch"
+# Disable the show-delay so the switcher appears instantly on Alt-Tab press.
+kwriteconfig6 --file kwinrc --group "TabBox" --key ShowDelay --type bool false
+kwriteconfig6 --file kwinrc --group "TabBox" --key DelayTime 0
+# Make sure tabbox actually shows
+kwriteconfig6 --file kwinrc --group "TabBox" --key HighlightWindows --type bool true
+qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
+echo "    kwinrc: TabBox=coverswitch, TabBoxAlternative=flipswitch"
+
+# Diagnostic: print where to look if it doesn't work.
+cat <<EOF
+    If Alt+Tab still uses the default switcher after re-login:
+      1. Check kwin loaded the package:  ls $TABBOX_DIR
+      2. Check kwin QML errors:          journalctl --user -b 0 -g 'kwin.*qml\\|coverswitch\\|flipswitch' | tail -20
+      3. Most likely fix is updating QML imports in $TABBOX_DIR/coverswitch/contents/ui/main.qml:
+         old: 'import org.kde.plasma.core 2.0 as PlasmaCore'  ->  '2.1' or '6.0'
+         old: 'import org.kde.kwin 2.0 as KWin'               ->  '3.0'
+      4. If broken beyond repair, open the file and remove this section.
+EOF
+
+# ---------------------------------------------------------------------------
 echo "==> 5/7  Panel: flush + height 40 + battery percentage"
 # Find the systemtray containment and the battery child-applet ID dynamically,
 # so this works on any Plasma 6 layout (IDs differ per system).

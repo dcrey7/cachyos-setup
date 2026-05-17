@@ -39,8 +39,21 @@ else
     kwriteconfig6 --file kwinrc --group "Plugins" --key "$key" --delete || true
   done
   kwriteconfig6 --file kwinrc --group "Effect-magiclamp" --key AnimationDuration --delete || true
+  for grp in TabBox TabBoxAlternative; do
+    for key in LayoutName HighlightWindows ShowDelay DelayTime; do
+      kwriteconfig6 --file kwinrc --group "$grp" --key "$key" --delete || true
+    done
+  done
   echo "    No kwinrc backup; deleted only the keys install.sh wrote"
 fi
+
+# Remove the rescued Cover Switch / Flip Switch tabbox QML if we installed it
+for layout in coverswitch flipswitch; do
+  if [[ -d "$HOME/.local/share/kwin/tabbox/$layout" ]]; then
+    rm -rf "$HOME/.local/share/kwin/tabbox/$layout"
+    echo "    removed ~/.local/share/kwin/tabbox/$layout"
+  fi
+done
 
 # ---------------------------------------------------------------------------
 echo "==> 2/5  Reload KWin + swap effects back to Plasma 6 defaults"

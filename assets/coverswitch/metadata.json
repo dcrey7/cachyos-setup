@@ -1,0 +1,17 @@
+{
+    "KPackageStructure": "KWin/WindowSwitcher",
+    "KPlugin": {
+        "Authors": [
+            { "Email": "isma.af@gmail.com", "Name": "Ismael Asensio" }
+        ],
+        "Description": "A Window Switcher layout showing thumbnails as a 3D carousel",
+        "Icon": "preferences-system-windows-effect-coverswitch",
+        "Id": "coverswitch",
+        "License": "GPL",
+        "Name": "Cover Switch",
+        "ServiceTypes": ["KWin/WindowSwitcher"],
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-MainScript": "ui/main.qml"
+}
