@@ -36,19 +36,19 @@ KWin.TabBoxSwitcher {
         color: "transparent"
 
         Component.onCompleted: {
-            console.log("coverswitch_g18 screenGeometry:",
+            console.log("coverswitch_g19 screenGeometry:",
                         tabBox.screenGeometry.x,
                         tabBox.screenGeometry.y,
                         tabBox.screenGeometry.width,
                         tabBox.screenGeometry.height)
-            console.log("coverswitch_g18 Screen:",
+            console.log("coverswitch_g19 Screen:",
                         "width", Screen.width,
                         "height", Screen.height,
                         "virtualX", Screen.virtualX,
                         "virtualY", Screen.virtualY,
                         "desktopAvailableWidth", Screen.desktopAvailableWidth,
                         "desktopAvailableHeight", Screen.desktopAvailableHeight)
-            console.log("coverswitch_g18 windowGeometry:",
+            console.log("coverswitch_g19 windowGeometry:",
                         window.x,
                         window.y,
                         window.width,
@@ -76,7 +76,7 @@ KWin.TabBoxSwitcher {
         Rectangle {
             anchors.fill: parent
             color: "black"
-            opacity: 0.35
+            opacity: 0.12
             z: -9
         }
 
