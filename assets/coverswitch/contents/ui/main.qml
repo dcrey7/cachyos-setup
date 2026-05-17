@@ -47,19 +47,19 @@ KWin.TabBoxSwitcher {
 
         Component.onCompleted: {
             tabBox.restartFadeIn()
-            console.log("coverswitch_g21 screenGeometry:",
+            console.log("coverswitch_g22 screenGeometry:",
                         tabBox.screenGeometry.x,
                         tabBox.screenGeometry.y,
                         tabBox.screenGeometry.width,
                         tabBox.screenGeometry.height)
-            console.log("coverswitch_g21 Screen:",
+            console.log("coverswitch_g22 Screen:",
                         "width", Screen.width,
                         "height", Screen.height,
                         "virtualX", Screen.virtualX,
                         "virtualY", Screen.virtualY,
                         "desktopAvailableWidth", Screen.desktopAvailableWidth,
                         "desktopAvailableHeight", Screen.desktopAvailableHeight)
-            console.log("coverswitch_g21 windowGeometry:",
+            console.log("coverswitch_g22 windowGeometry:",
                         window.x,
                         window.y,
                         window.width,
@@ -141,7 +141,7 @@ KWin.TabBoxSwitcher {
                     preferredHighlightBegin: 0.5
                     preferredHighlightEnd: 0.5
                     highlightRangeMode: PathView.StrictlyEnforceRange
-                    highlightMoveDuration: 220
+                    highlightMoveDuration: 200
                     pathItemCount: 7
 
                 path: Path {
@@ -199,13 +199,21 @@ KWin.TabBoxSwitcher {
                     readonly property real thumbnailFitScale: Math.min(
                         width / Math.max(1, thumbnail.implicitWidth),
                         height / Math.max(1, thumbnail.implicitHeight))
+                    property real openScale: tabBox.visible && tabBox.fadeInStarted ? 1.0 : 0.8
 
                     width: thumbnailView.boxWidth
                     height: thumbnailView.boxHeight
-                    scale: PathView.onPath ? PathView.scale : 0
+                    scale: PathView.onPath ? PathView.scale * openScale : 0
                     z: PathView.onPath ? Math.round((PathView.progress || 0) * 100) : -1
                     opacity: PathView.onPath ? 1 : 0
                     Accessible.name: caption
+
+                    Behavior on openScale {
+                        NumberAnimation {
+                            duration: 160
+                            easing.type: Easing.OutBack
+                        }
+                    }
 
                     KWin.WindowThumbnail {
                         id: thumbnail

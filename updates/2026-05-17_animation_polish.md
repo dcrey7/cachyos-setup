@@ -14,3 +14,9 @@ For this pass, the safer polish is to keep PathView's own index movement and sho
 ## Wayland behavior
 
 On Wayland, KWin owns the live windows and the tabbox QML only owns the switcher surface, so the live window cannot morph into a card from QML alone. A full live-window-to-card transform would need a KWin effect. The fade is compositor-friendly and should follow normal KWin/Qt Quick frame timing and vsync, but exact frame pacing still depends on compositor load and output refresh.
+
+## Coverswitch g22
+
+- Copied `coverswitch_g21` to `coverswitch_g22` and added a delegate-level `openScale` multiplier. Cards now start at `0.8 * PathView.scale` when the switcher appears and animate to their target PathView scale over 160ms with `Easing.OutBack`, alongside the existing 160ms `Easing.OutCubic` opacity fade.
+- Reduced built-in `PathView.highlightMoveDuration` from 220ms to 200ms for a slightly snappier cycle while preserving the existing path geometry, card positions, rotations, scales, and title placement.
+- Investigated an offset-driven PathView motion pass for cubic easing, but did not ship it in g22. The local `qml6` runtime probe did not produce useful PathView state, and taking over `offset` would change the current-index feedback path used by KWin selection, title text, click activation, and wrap direction handling. Because wrap-around must not regress, g22 keeps PathView's native index movement with the shorter 200ms duration.
