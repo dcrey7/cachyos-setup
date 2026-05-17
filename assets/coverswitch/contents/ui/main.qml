@@ -177,7 +177,7 @@ KWin.TabBoxSwitcher {
             PC3.Label {
                 visible: thumbnailView.count > 0
                 anchors.horizontalCenter: parent.horizontalCenter
-                y: thumbnailView.centerY + thumbnailView.boxHeight * 0.5 + Kirigami.Units.gridUnit * 2.5
+                y: thumbnailView.centerY + thumbnailView.boxHeight * 0.5 + Kirigami.Units.gridUnit * 0.5
                 width: Math.min(implicitWidth, parent.width * 0.72)
                 horizontalAlignment: Text.AlignHCenter
                 font.bold: true; font.pointSize: Math.round(Kirigami.Theme.defaultFont.pointSize * 1.15)
