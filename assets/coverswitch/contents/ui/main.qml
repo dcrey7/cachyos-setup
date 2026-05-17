@@ -124,6 +124,7 @@ KWin.TabBoxSwitcher {
                 delegate: Item {
                     id: delegateItem
                     readonly property real rotationAngle: PathView.rotation || 0
+                    readonly property string caption: model.caption ? String(model.caption) : ""
                     readonly property real thumbnailFitScale: Math.min(
                         width / Math.max(1, thumbnail.implicitWidth),
                         height / Math.max(1, thumbnail.implicitHeight))
