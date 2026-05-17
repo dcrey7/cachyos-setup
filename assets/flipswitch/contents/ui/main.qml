@@ -9,13 +9,15 @@ import QtQuick.Controls 2.15 as QQC2
 import QtQuick.Layouts 1.15
 
 import org.kde.kirigami 2.15 as Kirigami
-import org.kde.plasma.core 2.0 as PlasmaCore
+import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.components 3.0 as PC3
 
-import org.kde.kwin 2.0 as KWin
+// Plasma 6 / KWin 6 renames: Switcher -> TabBoxSwitcher,
+// ThumbnailItem -> WindowThumbnail, import 2.0 -> 3.0
+import org.kde.kwin 3.0 as KWin
 
 
-KWin.Switcher {
+KWin.TabBoxSwitcher {
     id: tabBox
     currentIndex: thumbnailView ? thumbnailView.currentIndex : -1
 
@@ -23,13 +25,26 @@ KWin.Switcher {
         id: dialog
         location: PlasmaCore.Types.Floating
         visible: tabBox.visible
-        flags: Qt.X11BypassWindowManagerHint
+        flags: Qt.X11BypassWindowManagerHint | Qt.FramelessWindowHint
+        backgroundHints: PlasmaCore.Dialog.SolidBackground
         x: screenGeometry.x
         y: screenGeometry.y
 
-        mainItem: ColumnLayout {
-            width: tabBox.screenGeometry.width - dialog.margins.left - dialog.margins.right
-            height: tabBox.screenGeometry.height - dialog.margins.top - dialog.margins.bottom
+        mainItem: Item {
+            width:  tabBox.screenGeometry.width
+            height: tabBox.screenGeometry.height
+
+            // Full-screen black dim overlay (matches GNOME dim-factor=1.0).
+            // Prevents the live windows from being visible behind the deck.
+            Rectangle {
+                anchors.fill: parent
+                color: "black"
+                opacity: 1.0
+                z: -10
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
 
             PathView {
                 id: thumbnailView
@@ -100,7 +115,7 @@ KWin.Switcher {
                     // Reduce opacity on the end so items dissapear more naturally
                     opacity: Math.min(1, (1 - PathView.progress) / thumbnailView.preferredHighlightBegin);
 
-                    KWin.ThumbnailItem {
+                    KWin.WindowThumbnail {
                         id: thumbnail
                         readonly property double ratio: implicitWidth / implicitHeight
 
@@ -186,9 +201,10 @@ KWin.Switcher {
                     Layout.maximumWidth: tabBox.screenGeometry.width * 0.8
                     Layout.alignment: Qt.AlignCenter
                 }
-            }
-        }
-    }
+                }   // ColumnLayout inner RowLayout closes -- this one closes ColumnLayout
+            }       // ColumnLayout
+        }           // mainItem Item
+    }               // PlasmaCore.Dialog
 
     onCurrentIndexChanged: {
         if (currentIndex === thumbnailView.currentIndex) {
