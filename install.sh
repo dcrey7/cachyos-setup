@@ -270,6 +270,32 @@ qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript '
 ' >/dev/null 2>&1 && echo "    Panel: floating=false, height=40"
 
 # ---------------------------------------------------------------------------
+echo "==> 5b/7  Touchpad: enable natural scrolling"
+# Per-device libinput config in ~/.config/kcminputrc. Enumerates touchpad-class
+# devices via /sys/class/input and writes NaturalScroll=true for each.
+touched_any=0
+for inputdir in /sys/class/input/event*/device; do
+  [[ -r "$inputdir/name" ]] || continue
+  name="$(cat "$inputdir/name" 2>/dev/null)"
+  echo "$name" | grep -qi touchpad || continue
+  vendor="$(cat "$inputdir/id/vendor" 2>/dev/null)"
+  product="$(cat "$inputdir/id/product" 2>/dev/null)"
+  [[ -n "$vendor" && -n "$product" ]] || continue
+  vendor_dec=$((16#$vendor))
+  product_dec=$((16#$product))
+  kwriteconfig6 --file kcminputrc \
+    --group "Libinput" --group "$vendor_dec" --group "$product_dec" --group "$name" \
+    --key NaturalScroll --type bool true
+  echo "    NaturalScroll=true for $name"
+  touched_any=1
+done
+if [[ $touched_any -eq 1 ]]; then
+  qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
+else
+  echo "    No touchpad-class device found, skipping."
+fi
+
+# ---------------------------------------------------------------------------
 echo "==> 6/7  VSCode native title bar (if installed)"
 vscode_settings="$HOME/.config/Code/User/settings.json"
 if [[ -d "$HOME/.config/Code" ]]; then

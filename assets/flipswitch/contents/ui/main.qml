@@ -4,47 +4,52 @@
  SPDX-License-Identifier: GPL-2.0-or-later
  */
 
-import QtQuick 2.15
-import QtQuick.Controls 2.15 as QQC2
-import QtQuick.Layouts 1.15
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Window
 
-import org.kde.kirigami 2.15 as Kirigami
-import org.kde.plasma.core as PlasmaCore
-import org.kde.plasma.components 3.0 as PC3
+import org.kde.kirigami as Kirigami
+import org.kde.ksvg as KSvg
+import org.kde.plasma.components as PC3
 
 // Plasma 6 / KWin 6 renames: Switcher -> TabBoxSwitcher,
 // ThumbnailItem -> WindowThumbnail, import 2.0 -> 3.0
-import org.kde.kwin 3.0 as KWin
+import org.kde.kwin as KWin
 
 
 KWin.TabBoxSwitcher {
     id: tabBox
     currentIndex: thumbnailView ? thumbnailView.currentIndex : -1
 
-    PlasmaCore.Dialog {
-        id: dialog
-        location: PlasmaCore.Types.Floating
-        visible: tabBox.visible
-        flags: Qt.X11BypassWindowManagerHint | Qt.FramelessWindowHint
-        backgroundHints: PlasmaCore.Dialog.SolidBackground
-        x: screenGeometry.x
-        y: screenGeometry.y
+    Window {
+        id: window
 
-        mainItem: Item {
-            width:  tabBox.screenGeometry.width
-            height: tabBox.screenGeometry.height
+        x: tabBox.screenGeometry.x
+        y: tabBox.screenGeometry.y
+        width: tabBox.screenGeometry.width
+        height: tabBox.screenGeometry.height
+        flags: Qt.Popup | Qt.BypassWindowManagerHint | Qt.FramelessWindowHint
+        visibility: Window.FullScreen
+        visible: true
+        color: "transparent"
 
-            // Full-screen black dim overlay (matches GNOME dim-factor=1.0).
-            // Prevents the live windows from being visible behind the deck.
-            Rectangle {
-                anchors.fill: parent
-                color: "black"
-                opacity: 1.0
-                z: -10
-            }
+        Accessible.name: thumbnailView.currentItem ? thumbnailView.currentItem.caption : ""
 
-            ColumnLayout {
-                anchors.fill: parent
+        KWin.DesktopBackground {
+            anchors.fill: parent
+            activity: KWin.Workspace.currentActivity
+            desktop: KWin.Workspace.currentVirtualDesktop
+            outputName: window.screen.name
+            z: -10
+        }
+
+        Kirigami.PlaceholderMessage {
+            anchors.centerIn: parent
+            width: parent.width - Kirigami.Units.largeSpacing * 2
+            icon.source: "edit-none"
+            text: i18ndc("kwin", "@info:placeholder no entries in the task switcher", "No open windows")
+            visible: thumbnailView.count === 0
+        }
 
             PathView {
                 id: thumbnailView
@@ -57,8 +62,7 @@ KWin.TabBoxSwitcher {
                 readonly property int boxHeight: tabBox.screenGeometry.height * boxScaleFactor
 
                 focus: true
-                Layout.fillWidth: true
-                Layout.fillHeight: true
+                anchors.fill: parent
 
                 preferredHighlightBegin: 1/(visibleCount + 1)
                 preferredHighlightEnd: preferredHighlightBegin
@@ -68,7 +72,7 @@ KWin.TabBoxSwitcher {
                 // without taking into account how much distance the thumbnails travel in that time.
                 // To compensate the speed, we slowly reduce the duration with the number of thumbnails,
                 // starting from `veryLongDuration` when there are 2 of them
-                highlightMoveDuration: PlasmaCore.Units.veryLongDuration * (2 / Math.sqrt(visibleCount + 1))
+                highlightMoveDuration: Kirigami.Units.veryLongDuration * (2 / Math.sqrt(visibleCount + 1))
 
                 pathItemCount: 12
 
@@ -123,17 +127,6 @@ KWin.TabBoxSwitcher {
                         anchors.fill: parent
                     }
 
-                    Kirigami.ShadowedRectangle {
-                        anchors.fill: parent
-                        z: -1
-
-                        color: "transparent"
-                        shadow.size: PlasmaCore.Units.gridUnit
-                        shadow.color: "black"
-                        opacity: 0.5
-                        shadow.yOffset: 1
-                    }
-
                     TapHandler {
                         grabPermissions: PointerHandler.TakeOverForbidden
                         gesturePolicy: TapHandler.WithinBounds
@@ -154,10 +147,9 @@ KWin.TabBoxSwitcher {
                     angle: 10
                 }
 
-                layer.enabled: true
-                layer.smooth: true
+                // layer.enabled removed for perf.
 
-                highlight: PlasmaCore.FrameSvgItem {
+                highlight: KSvg.FrameSvgItem {
                     imagePath: "widgets/viewitem"
                     prefix: "hover"
 
@@ -165,8 +157,8 @@ KWin.TabBoxSwitcher {
 
                     visible: target !== null
                     anchors.centerIn: target
-                    width: target ? target.width + 6 * PlasmaCore.Units.smallSpacing : 0
-                    height: target ? target.height + 6 * PlasmaCore.Units.smallSpacing : 0
+                    width: target ? target.width + 6 * Kirigami.Units.smallSpacing : 0
+                    height: target ? target.height + 6 * Kirigami.Units.smallSpacing : 0
                     scale: target ? target.scale : 1
                     z: target ? target.z - 0.5 : -0.5
                 }
@@ -180,31 +172,41 @@ KWin.TabBoxSwitcher {
             }
 
             RowLayout {
-                Layout.preferredHeight: PlasmaCore.Units.iconSizes.large
-                Layout.margins: PlasmaCore.Units.gridUnit
-                Layout.alignment: Qt.AlignCenter
-                spacing: PlasmaCore.Units.gridUnit
+                id: infoBar
 
-                PlasmaCore.IconItem {
+                height: Kirigami.Units.iconSizes.large
+                spacing: Kirigami.Units.gridUnit
+                visible: thumbnailView.count > 0
+
+                anchors {
+                    horizontalCenter: parent.horizontalCenter
+                    bottom: parent.bottom
+                    margins: Kirigami.Units.gridUnit
+                }
+
+                Kirigami.Icon {
                     source: thumbnailView.currentItem ? thumbnailView.currentItem.icon : ""
-                    implicitWidth: PlasmaCore.Units.iconSizes.large
-                    implicitHeight: PlasmaCore.Units.iconSizes.large
+                    implicitWidth: Kirigami.Units.iconSizes.large
+                    implicitHeight: Kirigami.Units.iconSizes.large
                     Layout.alignment: Qt.AlignCenter
                 }
 
                 PC3.Label {
                     font.bold: true
-                    font.pointSize: Math.round(PlasmaCore.Theme.defaultFont.pointSize * 1.6)
+                    font.pointSize: Math.round(Kirigami.Theme.defaultFont.pointSize * 1.6)
                     text: thumbnailView.currentItem ? thumbnailView.currentItem.caption : ""
+                    textFormat: Text.PlainText
                     maximumLineCount: 1
                     elide: Text.ElideMiddle
                     Layout.maximumWidth: tabBox.screenGeometry.width * 0.8
                     Layout.alignment: Qt.AlignCenter
                 }
-                }   // ColumnLayout inner RowLayout closes -- this one closes ColumnLayout
-            }       // ColumnLayout
-        }           // mainItem Item
-    }               // PlasmaCore.Dialog
+            }
+
+        onSceneGraphError: () => {
+            // This slot is intentionally left blank, otherwise QtQuick may post a qFatal() message on a graphics reset.
+        }
+    }               // Window
 
     onCurrentIndexChanged: {
         if (currentIndex === thumbnailView.currentIndex) {
@@ -230,5 +232,6 @@ KWin.TabBoxSwitcher {
         if (!visible) {
             thumbnailView.currentIndex = 0;
         }
+        window.visible = visible;
     }
 }
