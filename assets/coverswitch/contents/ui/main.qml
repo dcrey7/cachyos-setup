@@ -1,81 +1,44 @@
 /*
  SPDX-FileCopyrightText: 2021 Ismael Asensio <isma.af@gmail.com>
- SPDX-FileCopyrightText: 2026 cachyos-setup (Plasma 6 port + GNOME coverflow tuning)
+ SPDX-FileCopyrightText: 2026 cachyos-setup (GNOME-styled Plasma 6 cover switch with panel-visible workaround)
 
  SPDX-License-Identifier: GPL-2.0-or-later
 */
 
 import QtQuick
-import QtQuick.Layouts
 import QtQuick.Window
 
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PC3
-
 import org.kde.kwin as KWin
-
 
 KWin.TabBoxSwitcher {
     id: tabBox
     currentIndex: thumbnailView ? thumbnailView.currentIndex : -1
-    readonly property int panelReserve: 40
     property bool fadeInStarted: false
 
     function restartFadeIn() {
         fadeInStarted = false
-        Qt.callLater(function() {
-            if (tabBox.visible) {
-                fadeInStarted = true
-            }
-        })
+        Qt.callLater(function() { if (tabBox.visible) fadeInStarted = true })
     }
 
     Window {
         id: window
-
-        readonly property int rawScreenWidth: Math.max(Screen.width, tabBox.screenGeometry.width, Screen.desktopAvailableWidth)
-        readonly property int rawScreenHeight: Math.max(Screen.height, tabBox.screenGeometry.height, Screen.desktopAvailableHeight)
-
         x: tabBox.screenGeometry.x
         y: tabBox.screenGeometry.y
-        width: rawScreenWidth
-        height: Math.max(1, rawScreenHeight - tabBox.panelReserve)
+        width: Math.max(Screen.width, tabBox.screenGeometry.width, Screen.desktopAvailableWidth)
+        height: Math.max(1, Math.max(Screen.height, tabBox.screenGeometry.height, Screen.desktopAvailableHeight) - 40)
         flags: Qt.BypassWindowManagerHint | Qt.FramelessWindowHint
         visibility: Window.Windowed
         visible: true
         color: "transparent"
 
-        Component.onCompleted: {
-            tabBox.restartFadeIn()
-            console.log("coverswitch_g22 screenGeometry:",
-                        tabBox.screenGeometry.x,
-                        tabBox.screenGeometry.y,
-                        tabBox.screenGeometry.width,
-                        tabBox.screenGeometry.height)
-            console.log("coverswitch_g22 Screen:",
-                        "width", Screen.width,
-                        "height", Screen.height,
-                        "virtualX", Screen.virtualX,
-                        "virtualY", Screen.virtualY,
-                        "desktopAvailableWidth", Screen.desktopAvailableWidth,
-                        "desktopAvailableHeight", Screen.desktopAvailableHeight)
-            console.log("coverswitch_g22 windowGeometry:",
-                        window.x,
-                        window.y,
-                        window.width,
-                        window.height,
-                        "panelReserve", tabBox.panelReserve)
-        }
+        Component.onCompleted: tabBox.restartFadeIn()
 
         KWin.DesktopBackground {
             id: desktopBackground
-
-            x: 0
-            y: 0
-            width: Screen.width
-            height: Screen.height
-            activity: KWin.Workspace.currentActivity
-            outputName: window.screen.name
+            width: Screen.width; height: Screen.height
+            activity: KWin.Workspace.currentActivity; outputName: window.screen.name
             z: -10
 
             Binding {
@@ -91,146 +54,99 @@ KWin.TabBoxSwitcher {
             id: fader
             anchors.fill: parent
             opacity: tabBox.visible && tabBox.fadeInStarted ? 1 : 0
+            Accessible.name: thumbnailView.currentItem ? thumbnailView.currentItem.caption : ""
 
             Behavior on opacity {
                 NumberAnimation {
                     duration: 160
                     easing.type: Easing.OutCubic
+                    onRunningChanged: if (!running && fader.opacity === 0 && !tabBox.visible) window.visible = false
                 }
             }
 
-            Rectangle {
-                x: 0
-                y: 0
-                width: Screen.width
-                height: Screen.height
-                color: "black"
-                opacity: 0.12
-                z: -9
-            }
+            Rectangle { width: Screen.width; height: Screen.height; color: "black"; opacity: 0.12; z: -9 }
 
-            Item {
-                id: scene
-                anchors {
-                    left: parent.left
-                    right: parent.right
-                    top: parent.top
-                }
-                height: parent.height
-                Accessible.name: thumbnailView.currentItem ? thumbnailView.currentItem.caption : ""
+            PathView {
+                id: thumbnailView
+                readonly property real previewRatio: 0.45
+                readonly property int boxWidth: Math.round(width * previewRatio)
+                readonly property int boxHeight: Math.round(height * previewRatio)
+                readonly property real centerY: height * 0.48
 
-                PathView {
-                    id: thumbnailView
-
-                    readonly property int visibleCount: Math.min(count, pathItemCount)
-                    readonly property real previewRatio: 0.45
-                    readonly property int boxWidth: Math.round(width * previewRatio)
-                    readonly property int boxHeight: Math.round(height * previewRatio)
-                    readonly property real centerY: height * 0.48
-                    readonly property real leftOuterX: width * 0.40
-                    readonly property real leftMiddleX: width * 0.43
-                    readonly property real leftInnerX: width * 0.46
-                    readonly property real centerX: width * 0.5
-                    readonly property real rightInnerX: width * 0.54
-                    readonly property real rightMiddleX: width * 0.57
-                    readonly property real rightOuterX: width * 0.60
-
-                    focus: true
-                    anchors.fill: parent
-
-                    preferredHighlightBegin: 0.5
-                    preferredHighlightEnd: 0.5
-                    highlightRangeMode: PathView.StrictlyEnforceRange
-                    highlightMoveDuration: 200
-                    pathItemCount: 7
+                focus: true
+                anchors.fill: parent
+                model: tabBox.model
+                preferredHighlightBegin: 0.5
+                preferredHighlightEnd: 0.5
+                highlightRangeMode: PathView.StrictlyEnforceRange
+                highlightMoveDuration: 220
+                pathItemCount: 7
 
                 path: Path {
-                    startX: thumbnailView.leftOuterX
+                    startX: thumbnailView.width * 0.40
                     startY: thumbnailView.centerY
                     PathAttribute { name: "progress"; value: 0.55 }
                     PathAttribute { name: "scale"; value: 0.50 }
                     PathAttribute { name: "rotation"; value: 60 }
                     PathPercent { value: 0 }
-
-                    PathLine { x: thumbnailView.leftMiddleX; y: thumbnailView.centerY }
+                    PathLine { x: thumbnailView.width * 0.43; y: thumbnailView.centerY }
                     PathAttribute { name: "progress"; value: 0.68 }
                     PathAttribute { name: "scale"; value: 0.65 }
                     PathAttribute { name: "rotation"; value: 45 }
                     PathPercent { value: 0.23 }
-
-                    PathLine { x: thumbnailView.leftInnerX; y: thumbnailView.centerY }
+                    PathLine { x: thumbnailView.width * 0.46; y: thumbnailView.centerY }
                     PathAttribute { name: "progress"; value: 0.84 }
                     PathAttribute { name: "scale"; value: 0.85 }
                     PathAttribute { name: "rotation"; value: 30 }
                     PathPercent { value: 0.40 }
-
-                    PathLine { x: thumbnailView.centerX; y: thumbnailView.centerY }
+                    PathLine { x: thumbnailView.width * 0.50; y: thumbnailView.centerY }
                     PathAttribute { name: "progress"; value: 1.0 }
                     PathAttribute { name: "scale"; value: 1.0 }
                     PathAttribute { name: "rotation"; value: 0 }
                     PathPercent { value: 0.50 }
-
-                    PathLine { x: thumbnailView.rightInnerX; y: thumbnailView.centerY }
+                    PathLine { x: thumbnailView.width * 0.54; y: thumbnailView.centerY }
                     PathAttribute { name: "progress"; value: 0.84 }
                     PathAttribute { name: "scale"; value: 0.85 }
                     PathAttribute { name: "rotation"; value: -30 }
                     PathPercent { value: 0.60 }
-
-                    PathLine { x: thumbnailView.rightMiddleX; y: thumbnailView.centerY }
+                    PathLine { x: thumbnailView.width * 0.57; y: thumbnailView.centerY }
                     PathAttribute { name: "progress"; value: 0.68 }
                     PathAttribute { name: "scale"; value: 0.65 }
                     PathAttribute { name: "rotation"; value: -45 }
                     PathPercent { value: 0.77 }
-
-                    PathLine { x: thumbnailView.rightOuterX; y: thumbnailView.centerY }
+                    PathLine { x: thumbnailView.width * 0.60; y: thumbnailView.centerY }
                     PathAttribute { name: "progress"; value: 0.55 }
                     PathAttribute { name: "scale"; value: 0.50 }
                     PathAttribute { name: "rotation"; value: -60 }
                     PathPercent { value: 1 }
                 }
 
-                model: tabBox.model
-
                 delegate: Item {
                     id: delegateItem
-
-                    readonly property string caption: model.caption
                     readonly property real rotationAngle: PathView.rotation || 0
                     readonly property real thumbnailFitScale: Math.min(
                         width / Math.max(1, thumbnail.implicitWidth),
                         height / Math.max(1, thumbnail.implicitHeight))
-                    property real openScale: tabBox.visible && tabBox.fadeInStarted ? 1.0 : 0.8
 
                     width: thumbnailView.boxWidth
                     height: thumbnailView.boxHeight
-                    scale: PathView.onPath ? PathView.scale * openScale : 0
+                    scale: PathView.onPath ? PathView.scale : 0
                     z: PathView.onPath ? Math.round((PathView.progress || 0) * 100) : -1
                     opacity: PathView.onPath ? 1 : 0
-                    Accessible.name: caption
-
-                    Behavior on openScale {
-                        NumberAnimation {
-                            duration: 160
-                            easing.type: Easing.OutBack
-                        }
-                    }
+                    Accessible.name: model.caption
 
                     KWin.WindowThumbnail {
                         id: thumbnail
-                        wId: windowId
-                        anchors.centerIn: parent
+                        wId: windowId; anchors.centerIn: parent
                         width: Math.round(Math.max(1, implicitWidth) * delegateItem.thumbnailFitScale)
                         height: Math.round(Math.max(1, implicitHeight) * delegateItem.thumbnailFitScale)
-                        smooth: true
+                        smooth: false
                     }
 
                     transform: Rotation {
                         origin {
-                            x: delegateItem.rotationAngle > 0
-                                ? 0
-                                : (delegateItem.rotationAngle < 0
-                                    ? delegateItem.width
-                                    : delegateItem.width / 2)
+                            x: delegateItem.rotationAngle > 0 ? 0
+                               : (delegateItem.rotationAngle < 0 ? delegateItem.width : delegateItem.width / 2)
                             y: delegateItem.height / 2
                         }
                         axis { x: 0; y: 1; z: 0 }
@@ -245,19 +161,13 @@ KWin.TabBoxSwitcher {
                                 thumbnailView.model.activate(index)
                                 return
                             }
-                            thumbnailView.movementDirection =
-                                (delegateItem.rotationAngle < 0)
-                                    ? PathView.Positive
-                                    : PathView.Negative
+                            thumbnailView.movementDirection = delegateItem.rotationAngle < 0 ? PathView.Positive : PathView.Negative
                             thumbnailView.currentIndex = index
                         }
                     }
                 }
 
-                onMovementStarted: {
-                    movementDirection = PathView.Shortest
-                }
-
+                onMovementStarted: movementDirection = PathView.Shortest
                 Keys.onUpPressed: decrementCurrentIndex()
                 Keys.onLeftPressed: decrementCurrentIndex()
                 Keys.onDownPressed: incrementCurrentIndex()
@@ -265,20 +175,16 @@ KWin.TabBoxSwitcher {
             }
 
             PC3.Label {
-                id: infoBar
-
                 visible: thumbnailView.count > 0
                 anchors.horizontalCenter: parent.horizontalCenter
                 y: thumbnailView.centerY + thumbnailView.boxHeight * 0.5 + Kirigami.Units.gridUnit
                 width: Math.min(implicitWidth, parent.width * 0.72)
                 horizontalAlignment: Text.AlignHCenter
-                font.bold: true
-                font.pointSize: Math.round(Kirigami.Theme.defaultFont.pointSize * 1.15)
+                font.bold: true; font.pointSize: Math.round(Kirigami.Theme.defaultFont.pointSize * 1.15)
                 color: "white"
                 text: thumbnailView.currentItem ? thumbnailView.currentItem.caption : ""
                 textFormat: Text.PlainText
-                maximumLineCount: 1
-                elide: Text.ElideMiddle
+                maximumLineCount: 1; elide: Text.ElideMiddle
             }
 
             Kirigami.PlaceholderMessage {
@@ -289,38 +195,28 @@ KWin.TabBoxSwitcher {
                 visible: thumbnailView.count === 0
             }
         }
-        }
-
-        onSceneGraphError: () => {
-        }
     }
 
     onCurrentIndexChanged: {
         if (currentIndex === thumbnailView.currentIndex) {
             return
         }
-        if (thumbnailView.count === 2 ||
-            (currentIndex === 0 && thumbnailView.currentIndex === thumbnailView.count - 1)) {
+        if (thumbnailView.count === 2 || (currentIndex === 0 && thumbnailView.currentIndex === thumbnailView.count - 1)) {
             thumbnailView.movementDirection = PathView.Positive
-        } else if (currentIndex === (thumbnailView.count - 1) && thumbnailView.currentIndex === 0) {
+        } else if (currentIndex === thumbnailView.count - 1 && thumbnailView.currentIndex === 0) {
             thumbnailView.movementDirection = PathView.Negative
         } else {
-            thumbnailView.movementDirection =
-                (currentIndex > thumbnailView.currentIndex)
-                    ? PathView.Positive
-                    : PathView.Negative
+            thumbnailView.movementDirection = currentIndex > thumbnailView.currentIndex ? PathView.Positive : PathView.Negative
         }
         thumbnailView.currentIndex = tabBox.currentIndex
     }
 
     onVisibleChanged: {
         if (visible) {
-            window.visible = true
-            restartFadeIn()
+            window.visible = true; restartFadeIn()
         } else {
             fadeInStarted = false
             thumbnailView.currentIndex = 0
-            window.visible = false
         }
     }
 }
