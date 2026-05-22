@@ -1,19 +1,37 @@
 #!/usr/bin/env bash
 # CachyOS / KDE Plasma 6 desktop tweaks:
 #   - Taskbar: flush with bottom, height 40
+#   - Darkly application style with transparent widgets
 #   - WhiteSur-Dark window decoration, traffic-light buttons on the RIGHT
 #   - Magic Lamp minimize effect (700ms duration, independent of global anim speed)
 #   - Eye candy: Wobbly Windows (drag), Glide (open), Sheet (dialogs)
+#   - Blur tuning, translucent Breeze Dark panel, centered KRunner
+#   - Transparent Konsole profile
 #   - Fade Desktop animation when switching virtual desktops (replaces Slide)
 #   - Cube effect via kdeplasma-addons (Meta+C to activate)
 #   - Battery applet: show percentage on icon, force always-visible in tray
 #   - Auto-patch VSCode to use native title bar (if installed)
+#   - Optional zsh-setup integration
 #
 # Idempotent. Run again safely. Wayland-aware (Plasma 6 / KWin Wayland).
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-echo "==> 0/7  Sanity checks"
+echo "==> 0/11  Sanity checks"
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ASSETS_DIR="$REPO_DIR/assets"
+FORCE_DARKLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --force-darkly) FORCE_DARKLY=1 ;;
+    *)
+      echo "    ERROR: Unknown option '$arg'." >&2
+      echo "    Usage: $0 [--force-darkly]" >&2
+      exit 1
+      ;;
+  esac
+done
 
 if [[ "${XDG_CURRENT_DESKTOP:-}" != *KDE* ]]; then
   echo "    ERROR: This script targets KDE Plasma. XDG_CURRENT_DESKTOP='${XDG_CURRENT_DESKTOP:-}'." >&2
@@ -41,11 +59,11 @@ done
 echo "    All required tools present."
 
 # ---------------------------------------------------------------------------
-echo "==> 1/7  Backup current config"
+echo "==> 1/11  Backup current config"
 ts="$(date +%Y%m%d-%H%M%S)"
 backup_dir="$HOME/.config/cachyos-setup-backup-$ts"
 mkdir -p "$backup_dir"
-for f in kwinrc plasma-org.kde.plasma.desktop-appletsrc; do
+for f in kwinrc plasma-org.kde.plasma.desktop-appletsrc kdeglobals darklyrc konsolerc krunnerrc; do
   if [[ -f "$HOME/.config/$f" ]]; then
     cp "$HOME/.config/$f" "$backup_dir/$f"
     echo "    Backed up $f"
@@ -55,7 +73,7 @@ ln -sfn "$backup_dir" "$HOME/.config/cachyos-setup-backup-latest"
 echo "    Latest backup symlinked at ~/.config/cachyos-setup-backup-latest"
 
 # ---------------------------------------------------------------------------
-echo "==> 2/7  WhiteSur-kde theme (AUR)"
+echo "==> 2/11  WhiteSur-kde theme (AUR)"
 if pacman -Qi whitesur-kde-theme >/dev/null 2>&1; then
   echo "    Already installed."
   echo "installed_by_us=0" > "$backup_dir/whitesur.state"
@@ -69,7 +87,42 @@ if [[ ! -d /usr/share/aurorae/themes/WhiteSur-dark && ! -d "$HOME/.local/share/a
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 3/7  Window decoration + buttons-on-right"
+echo "==> 3/11  Darkly application style + transparent widgets"
+if [[ -f /usr/lib/qt6/plugins/styles/darkly6.so && "$FORCE_DARKLY" -eq 0 ]]; then
+  echo "    Darkly already installed. Use --force-darkly to rebuild."
+else
+  echo "    Installing Darkly build dependencies..."
+  sudo pacman -S --needed --noconfirm \
+    cmake extra-cmake-modules kdecoration qt6-declarative kcoreaddons kcmutils \
+    kcolorscheme kconfig kguiaddons kiconthemes kwindowsystem gcc make
+
+  darkly_build_dir="/tmp/Darkly-build"
+  rm -rf "$darkly_build_dir"
+  if git clone --depth=1 https://github.com/Bali10050/Darkly.git "$darkly_build_dir"; then
+    if (cd "$darkly_build_dir" && ./install.sh qt6); then
+      echo "    Darkly installed."
+    else
+      echo "    WARNING: Darkly installer failed; continuing without aborting." >&2
+    fi
+  else
+    echo "    WARNING: Darkly clone failed; continuing without aborting." >&2
+  fi
+fi
+
+kwriteconfig6 --file kdeglobals --group KDE --key widgetStyle Darkly
+plasma-apply-colorscheme Darkly >/dev/null 2>&1 || echo "    WARNING: Could not apply Darkly color scheme." >&2
+# Use Breeze Dark for Plasma shell: Darkly's panel SVG is opaque and ignores panelOpacity.
+plasma-apply-desktoptheme breeze-dark >/dev/null 2>&1 || echo "    WARNING: Could not apply Breeze Dark desktop theme." >&2
+kwriteconfig6 --file darklyrc --group Style --key MenuOpacity 80
+kwriteconfig6 --file darklyrc --group Style --key MenuBarOpacity 80
+kwriteconfig6 --file darklyrc --group Style --key ToolBarOpacity 80
+kwriteconfig6 --file darklyrc --group Style --key TabBarOpacity 80
+kwriteconfig6 --file darklyrc --group Style --key DolphinSidebarOpacity 70
+kwriteconfig6 --file darklyrc --group Style --key DolphinViewOpacity 100
+echo "    Darkly widget style applied; Breeze Dark desktop theme keeps panels translucent."
+
+# ---------------------------------------------------------------------------
+echo "==> 4/11  Window decoration + buttons-on-right"
 kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key library  "org.kde.kwin.aurorae"
 kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key theme    "__aurorae__svg__WhiteSur-dark"
 # Letters: M=menu, I=minimize, A=maximize, X=close. Left-to-right within each side.
@@ -78,7 +131,7 @@ kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key ButtonsOnRight 
 echo "    WhiteSur-dark; menu on left, min/max/close on right"
 
 # ---------------------------------------------------------------------------
-echo "==> 4/7  KWin effects (Magic Lamp + Wobbly/Glide/Sheet + Fade Desktop + Cube)"
+echo "==> 5/11  KWin effects (Magic Lamp + Wobbly/Glide/Sheet + Fade Desktop + Cube)"
 
 # Make sure kdeplasma-addons is installed (it provides the Cube effect on
 # Plasma 6 -- the classic one was removed and rewritten as a QML addon).
@@ -110,6 +163,11 @@ kwriteconfig6 --file kwinrc --group "Plugins" --key fadedesktopEnabled --type bo
 # Cube (Meta+C activates it). Built-in once kdeplasma-addons is installed.
 kwriteconfig6 --file kwinrc --group "Plugins" --key cubeEnabled --type bool true
 
+# Blur tuning for transparent menus, panels, and Konsole.
+kwriteconfig6 --file kwinrc --group "Plugins" --key blurEnabled --type bool true
+kwriteconfig6 --file kwinrc --group "Effect-blur" --key BlurStrength 10
+kwriteconfig6 --file kwinrc --group "Effect-blur" --key NoiseStrength 0
+
 # `KWin reconfigure` rereads kwinrc but does NOT load/unload effects on
 # Wayland -- we have to swap them explicitly via the Effects D-Bus interface.
 qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
@@ -119,10 +177,11 @@ done
 for effect_on in magiclamp wobblywindows glide sheet fadedesktop cube; do
   qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect "$effect_on" >/dev/null 2>&1 || true
 done
-echo "    Effects loaded: magiclamp(700ms), wobbly, glide, sheet, fadedesktop, cube"
+qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect blur >/dev/null 2>&1 || true
+echo "    Effects loaded: magiclamp(700ms), wobbly, glide, sheet, fadedesktop, cube, blur"
 
 # ---------------------------------------------------------------------------
-echo "==> 4b/7  Cover Switch + Flip Switch tabbox layouts (rescued from KDE MR !91)"
+echo "==> 6/11  Cover Switch + Flip Switch tabbox layouts (rescued from KDE MR !91)"
 #
 # Honest context: the 3D Cover Switch / Flip Switch from KDE 4.x/5.x was REMOVED
 # in Plasma 6 and there is NO replacement in the official KDE Store, AUR, or
@@ -178,7 +237,7 @@ cat <<EOF
 EOF
 
 # ---------------------------------------------------------------------------
-echo "==> 5/7  Panel: flush + height 40 + battery percentage"
+echo "==> 7/11  Panel: flush + height 40 + translucent + battery percentage"
 # Find the systemtray containment and the battery child-applet ID dynamically,
 # so this works on any Plasma 6 layout (IDs differ per system).
 appletsrc="$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc"
@@ -218,6 +277,19 @@ with open(path) as f:
 print(*(battery or ("", "", "")), *(clock or ("", "")))
 PY
 )
+mapfile -t PANEL_IDS < <(awk '
+  /^\[Containments\]\[[0-9]+\]$/ {
+    section = $0
+    id = section
+    sub(/^\[Containments\]\[/, "", id)
+    sub(/\]$/, "", id)
+    next
+  }
+  /^plugin=org\.kde\.panel$/ && id != "" {
+    print id
+    id = ""
+  }
+' "$appletsrc" 2>/dev/null | sort -n -u)
 if [[ -n "$BAT_AID" ]]; then
   echo "    Battery applet path: Containments[$BAT_CID]/Applets[$BAT_TRAY_AID]/Applets[$BAT_AID]"
 fi
@@ -257,6 +329,18 @@ if [[ -n "$CLOCK_AID" ]]; then
   echo "    Clock: date beside time (not stacked)"
 fi
 
+if [[ "${#PANEL_IDS[@]}" -gt 0 ]]; then
+  for panel_id in "${PANEL_IDS[@]}"; do
+    kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+      --group "Containments" --group "$panel_id" \
+      --group "General" \
+      --key panelOpacity 2
+  done
+  echo "    Panel opacity: translucent for containment IDs ${PANEL_IDS[*]}"
+else
+  echo "    WARNING: No panel containments found for panelOpacity." >&2
+fi
+
 nohup kstart plasmashell >/dev/null 2>&1 & disown
 sleep 3
 
@@ -269,8 +353,12 @@ qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript '
   }
 ' >/dev/null 2>&1 && echo "    Panel: floating=false, height=40"
 
+kwriteconfig6 --file krunnerrc --group General --key FreeFloating --type bool true
+kwriteconfig6 --file krunnerrc --group General --key Position Center
+echo "    KRunner: centered free-floating launcher"
+
 # ---------------------------------------------------------------------------
-echo "==> 5b/7  Touchpad: enable natural scrolling"
+echo "==> 8/11  Touchpad: enable natural scrolling"
 # Per-device libinput config in ~/.config/kcminputrc. Enumerates touchpad-class
 # devices via /sys/class/input and writes NaturalScroll=true for each.
 touched_any=0
@@ -296,7 +384,21 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 6/7  VSCode native title bar (if installed)"
+echo "==> 9/11  Konsole transparent profile"
+konsole_assets="$ASSETS_DIR/konsole"
+konsole_dir="$HOME/.local/share/konsole"
+if [[ -f "$konsole_assets/Transparent.profile" && -f "$konsole_assets/WhiteOnBlackTransparent.colorscheme" ]]; then
+  mkdir -p "$konsole_dir"
+  cp "$konsole_assets/Transparent.profile" "$konsole_dir/Transparent.profile"
+  cp "$konsole_assets/WhiteOnBlackTransparent.colorscheme" "$konsole_dir/WhiteOnBlackTransparent.colorscheme"
+  kwriteconfig6 --file konsolerc --group "Desktop Entry" --key DefaultProfile Transparent.profile
+  echo "    Konsole: Transparent.profile installed and set as default"
+else
+  echo "    WARNING: Konsole template files missing under $konsole_assets; skipping." >&2
+fi
+
+# ---------------------------------------------------------------------------
+echo "==> 10/11  VSCode native title bar (if installed)"
 vscode_settings="$HOME/.config/Code/User/settings.json"
 if [[ -d "$HOME/.config/Code" ]]; then
   mkdir -p "$(dirname "$vscode_settings")"
@@ -316,6 +418,24 @@ PY
   echo "    Patched VSCode settings.json"
 else
   echo "    VSCode not installed; skipping."
+fi
+
+# ---------------------------------------------------------------------------
+echo "==> 11/11  Install zsh-setup"
+zsh_setup_dir="$HOME/zsh-setup"
+if [[ ! -d "$zsh_setup_dir" ]]; then
+  if git clone --depth=1 https://github.com/dcrey7/zsh-setup.git "$zsh_setup_dir"; then
+    echo "    zsh-setup cloned."
+  else
+    echo "    WARNING: Could not clone zsh-setup; continuing without aborting." >&2
+  fi
+else
+  echo "    zsh-setup already present."
+fi
+if [[ -f "$zsh_setup_dir/install.sh" ]]; then
+  bash "$zsh_setup_dir/install.sh" || echo "    WARNING: zsh-setup installer failed; continuing without aborting." >&2
+else
+  echo "    WARNING: $zsh_setup_dir/install.sh not found; skipping zsh-setup install." >&2
 fi
 
 # ---------------------------------------------------------------------------
