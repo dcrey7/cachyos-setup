@@ -176,7 +176,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 3/15  Darkly application style + transparency"
+echo "==> 3/15  Darkly application style + transparency + Look-and-Feel"
 if [[ "$restored_kdeglobals" -eq 0 ]]; then
   write_key --file kdeglobals --group KDE --key widgetStyle Breeze
   if have plasma-apply-colorscheme; then
@@ -184,6 +184,30 @@ if [[ "$restored_kdeglobals" -eq 0 ]]; then
   fi
   if have plasma-apply-desktoptheme; then
     plasma-apply-desktoptheme default >/dev/null 2>&1 || plasma-apply-desktoptheme breeze-dark >/dev/null 2>&1 || warn "Could not apply default desktop theme"
+  fi
+
+  # Restore stock CachyOS Look-and-Feel (Sweet-Mars on default install)
+  # falling back to BreezeDark if Sweet-Mars isn't available.
+  if have plasma-apply-lookandfeel; then
+    plasma-apply-lookandfeel -a Sweet-Mars >/dev/null 2>&1 \
+      || plasma-apply-lookandfeel -a org.kde.breezedark.desktop >/dev/null 2>&1 \
+      || warn "Could not apply Sweet-Mars or BreezeDark look-and-feel"
+  fi
+
+  # Reset icon theme away from Win11 / WhiteSur to a sane default.
+  write_key --file kdeglobals --group Icons --key Theme breeze-dark
+
+  # Reset wallpaper to CachyOS default (cachyos.svg) via plasmashell scripting.
+  if have qdbus6; then
+    qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript '
+      var ds = desktops();
+      for (var i = 0; i < ds.length; i++) {
+        var d = ds[i];
+        d.wallpaperPlugin = "org.kde.image";
+        d.currentConfigGroup = ["Wallpaper", "org.kde.image", "General"];
+        d.writeConfig("Image", "file:///usr/share/wallpapers/cachyos.svg");
+      }
+    ' >/dev/null 2>&1 || warn "Could not reset wallpaper via plasmashell scripting"
   fi
 else
   echo "    kdeglobals restored from backup; not overriding preinstall style/theme"
@@ -295,54 +319,119 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 8/15  Strip panelspacers, marginsseparators, peek-at-desktop"
+echo "==> 8/15  Restore stock CachyOS panel layout"
 if [[ "$restored_applets" -eq 1 ]]; then
   echo "    Original panel layout restored from backup"
 elif [[ -f "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" ]] && have_python; then
-  # Strip any cosmetic / centered-taskbar widgets that aren't on a stock
-  # CachyOS panel: panelspacer (round 19), marginsseparator (extra cosmetic
-  # gaps), and showdesktop (peek-at-desktop). install.sh removes the same set
-  # so install + uninstall are symmetric.
+  # Stock CachyOS Plasma 6 panel order is:
+  #   kickoff -> pager -> icontasks -> marginsseparator -> systemtray ->
+  #   digitalclock -> showdesktop (peek-at-desktop)
+  #
+  # cachyos-setup adds panelspacers (round 19) and may have removed
+  # showdesktop / extra marginsseparators along the way. This step:
+  #   - Removes ALL panelspacer applets (install.sh adds them).
+  #   - Removes EXTRA marginsseparators beyond the first one.
+  #   - Adds a showdesktop applet at the end if none present.
+  #   - Adds a marginsseparator before systemtray if none present.
   python3 - "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" <<'PY' || true
 import configparser, re, sys
-TARGETS = {
-    "org.kde.plasma.panelspacer",
-    "org.kde.plasma.marginsseparator",
-    "org.kde.plasma.showdesktop",
-}
 p = sys.argv[1]
 cp = configparser.RawConfigParser()
 cp.optionxform = str
 cp.read(p)
-panels = set()
+panels = []
 for s in cp.sections():
     m = re.fullmatch(r"Containments\]\[(\d+)", s.replace("][", "]["))
     if m and cp.get(s, "plugin", fallback="") == "org.kde.panel":
-        panels.add(m.group(1))
-removed = []
-for s in list(cp.sections()):
-    m = re.fullmatch(r"Containments\]\[(\d+)\]\[Applets\]\[(\d+)", s.replace("][", "]["))
-    if m and m.group(1) in panels:
-        if cp.get(s, "plugin", fallback="") in TARGETS:
-            removed.append((m.group(1), m.group(2)))
-            cp.remove_section(s)
-            prefix = f"Containments][{m.group(1)}][Applets][{m.group(2)}]["
-            for s2 in list(cp.sections()):
-                if s2.startswith(prefix):
-                    cp.remove_section(s2)
+        panels.append(m.group(1))
+
+def all_applet_ids():
+    ids = set()
+    for s in cp.sections():
+        m = re.fullmatch(r"Containments\]\[\d+\]\[Applets\]\[(\d+)", s.replace("][", "]["))
+        if m:
+            ids.add(int(m.group(1)))
+    return ids
+
+next_id = max(all_applet_ids() | {0}) + 1
+
+removed_panelspacer = 0
+removed_extra_sep = 0
+added_showdesktop = 0
+added_marginsseparator = 0
+
 for pid in panels:
-    sec = f"Containments][{pid}][General"
-    if cp.has_section(sec) and cp.has_option(sec, "AppletOrder"):
-        order = cp.get(sec, "AppletOrder").split(";")
-        bad = {aid for ppid, aid in removed if ppid == pid}
-        order = [x for x in order if x not in bad]
-        cp.set(sec, "AppletOrder", ";".join(order))
+    sec_general = f"Containments][{pid}][General"
+    if not (cp.has_section(sec_general) and cp.has_option(sec_general, "AppletOrder")):
+        continue
+    order = cp.get(sec_general, "AppletOrder").split(";")
+    order = [x for x in order if x]
+    plug_of = {}
+    for aid in order:
+        sec_a = f"Containments][{pid}][Applets][{aid}"
+        plug_of[aid] = cp.get(sec_a, "plugin", fallback="") if cp.has_section(sec_a) else ""
+
+    # 1) Remove ALL panelspacer applets
+    to_remove = [aid for aid in order if plug_of.get(aid) == "org.kde.plasma.panelspacer"]
+    # 2) Remove EXTRA marginsseparators (keep only the first one)
+    kept_first_sep = False
+    for aid in order:
+        if plug_of.get(aid) == "org.kde.plasma.marginsseparator":
+            if not kept_first_sep:
+                kept_first_sep = True
+            else:
+                to_remove.append(aid)
+
+    for aid in to_remove:
+        if plug_of.get(aid) == "org.kde.plasma.panelspacer":
+            removed_panelspacer += 1
+        else:
+            removed_extra_sep += 1
+        sec_a = f"Containments][{pid}][Applets][{aid}"
+        if cp.has_section(sec_a):
+            cp.remove_section(sec_a)
+        prefix = f"Containments][{pid}][Applets][{aid}]["
+        for s2 in list(cp.sections()):
+            if s2.startswith(prefix):
+                cp.remove_section(s2)
+    order = [x for x in order if x not in set(to_remove)]
+    plug_of = {aid: plug_of[aid] for aid in order if aid in plug_of}
+
+    # 3) Add marginsseparator before systemtray if none present
+    has_sep = any(plug_of.get(aid) == "org.kde.plasma.marginsseparator" for aid in order)
+    if not has_sep:
+        try:
+            st_idx = next(i for i, aid in enumerate(order) if plug_of.get(aid) == "org.kde.plasma.systemtray")
+        except StopIteration:
+            st_idx = len(order)
+        new_aid = str(next_id); next_id += 1
+        sec_a = f"Containments][{pid}][Applets][{new_aid}"
+        cp.add_section(sec_a)
+        cp.set(sec_a, "immutability", "1")
+        cp.set(sec_a, "plugin", "org.kde.plasma.marginsseparator")
+        order.insert(st_idx, new_aid)
+        added_marginsseparator += 1
+
+    # 4) Add showdesktop at the end if none present
+    has_showdesktop = any(plug_of.get(aid) == "org.kde.plasma.showdesktop" for aid in order)
+    if not has_showdesktop:
+        new_aid = str(next_id); next_id += 1
+        sec_a = f"Containments][{pid}][Applets][{new_aid}"
+        cp.add_section(sec_a)
+        cp.set(sec_a, "immutability", "1")
+        cp.set(sec_a, "plugin", "org.kde.plasma.showdesktop")
+        order.append(new_aid)
+        added_showdesktop += 1
+
+    cp.set(sec_general, "AppletOrder", ";".join(order))
+
 with open(p, "w") as f:
     cp.write(f, space_around_delimiters=False)
-print(f"    Removed {len(removed)} cosmetic applet(s) (panelspacer/marginsseparator/showdesktop)")
+print(f"    Removed {removed_panelspacer} panelspacer, {removed_extra_sep} extra marginsseparator")
+print(f"    Added   {added_marginsseparator} marginsseparator, {added_showdesktop} showdesktop")
 PY
 else
-  echo "    Could not access appletsrc; skipping"
+  echo "    Could not access appletsrc; skipping panel layout restore"
 fi
 
 # ---------------------------------------------------------------------------
