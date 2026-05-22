@@ -17,7 +17,6 @@ KWin.TabBoxSwitcher {
     currentIndex: thumbnailView ? thumbnailView.currentIndex : -1
     property bool fadeInStarted: false
     property int panelReserve: __PANEL_RESERVE__
-    property int sweepDirection: 1
     property bool correctingCurrentIndex: false
 
     readonly property int rawScreenWidth: Math.max(
@@ -64,19 +63,36 @@ KWin.TabBoxSwitcher {
         return undefined
     }
 
-    function rectForCurrentThumbnail() {
-        if (!thumbnailView || !thumbnailView.currentItem || !thumbnailView.currentItem.thumbnailItem) {
-            return null
+    function updateMorphAspect(idx) {
+        idx = clampIndex(idx)
+        if (idx < 0 || !thumbnailView || !thumbnailView.currentItem || thumbnailView.currentIndex !== idx) {
+            morphLayer.windowAspect = window.width / Math.max(1, window.height)
+            return
         }
 
         var thumb = thumbnailView.currentItem.thumbnailItem
-        var p1 = thumb.mapToItem(morphLayer.parent, 0, 0)
-        var p2 = thumb.mapToItem(morphLayer.parent, thumb.width, thumb.height)
+        if (thumb && thumb.width > 0 && thumb.height > 0) {
+            morphLayer.windowAspect = thumb.width / Math.max(1, thumb.height)
+        } else {
+            morphLayer.windowAspect = window.width / Math.max(1, window.height)
+        }
+    }
+
+    function rectForCenterCard() {
+        if (!thumbnailView || window.width <= 0 || window.height <= 0) {
+            return null
+        }
+
+        var w = Math.round(thumbnailView.width * thumbnailView.previewRatio)
+        var aspect = (morphLayer.windowAspect && morphLayer.windowAspect > 0)
+                   ? morphLayer.windowAspect
+                   : (window.width / Math.max(1, window.height))
+        var h = Math.round(w / Math.max(0.0001, aspect))
         return {
-            x: Math.min(p1.x, p2.x),
-            y: Math.min(p1.y, p2.y),
-            width: Math.max(1, Math.abs(p2.x - p1.x)),
-            height: Math.max(1, Math.abs(p2.y - p1.y))
+            x: Math.round((window.width - w) / 2),
+            y: Math.round((window.height - h) / 2),
+            width: Math.max(1, w),
+            height: Math.max(1, h)
         }
     }
 
@@ -85,6 +101,8 @@ KWin.TabBoxSwitcher {
         morphLayer.animationsEnabled = animate
         morphLayer.x = 0
         morphLayer.y = 0
+        morphLayer.width = window.width
+        morphLayer.height = window.height
         morphLayer.scale = 1
     }
 
@@ -93,12 +111,13 @@ KWin.TabBoxSwitcher {
             return
         }
 
-        var targetScale = Math.min(rect.width / window.width, rect.height / window.height)
         morphLayer.animationDuration = duration
         morphLayer.animationsEnabled = animate
-        morphLayer.scale = targetScale
-        morphLayer.x = rect.x + (rect.width - window.width * targetScale) / 2
-        morphLayer.y = rect.y + (rect.height - window.height * targetScale) / 2
+        morphLayer.x = rect.x
+        morphLayer.y = rect.y
+        morphLayer.width = rect.width
+        morphLayer.height = rect.height
+        morphLayer.scale = 1
     }
 
     function startOpenMorph() {
@@ -115,6 +134,7 @@ KWin.TabBoxSwitcher {
             return
         }
 
+        updateMorphAspect(idx)
         morphHideTimer.stop()
         morphLayer.windowId = wId
         morphLayer.active = true
@@ -125,7 +145,7 @@ KWin.TabBoxSwitcher {
             if (!tabBox.visible || !morphLayer.active) {
                 return
             }
-            var rect = rectForCurrentThumbnail()
+            var rect = rectForCenterCard()
             if (!rect) {
                 morphLayer.active = false
                 return
@@ -141,7 +161,8 @@ KWin.TabBoxSwitcher {
         }
 
         var wId = windowIdForIndex(thumbnailView.currentIndex)
-        var rect = rectForCurrentThumbnail()
+        updateMorphAspect(thumbnailView.currentIndex)
+        var rect = rectForCenterCard()
         if (wId === undefined || wId === null || !rect) {
             return
         }
@@ -161,48 +182,48 @@ KWin.TabBoxSwitcher {
         })
     }
 
-    function syncMovementDirection(nextIndex) {
-        if (!thumbnailView || nextIndex === thumbnailView.currentIndex) {
-            return
+    function wrappedIndex(idx) {
+        if (!thumbnailView || thumbnailView.count <= 0) {
+            return -1
         }
-        thumbnailView.movementDirection = nextIndex > thumbnailView.currentIndex ? PathView.Positive : PathView.Negative
+        return ((idx % thumbnailView.count) + thumbnailView.count) % thumbnailView.count
     }
 
-    function setCurrentIndexNoWrap(nextIndex) {
-        nextIndex = clampIndex(nextIndex)
+    function movementDirectionForTransition(fromIndex, toIndex) {
+        if (!thumbnailView || thumbnailView.count <= 1 || fromIndex === toIndex) {
+            return PathView.Shortest
+        }
+        if (fromIndex === thumbnailView.count - 1 && toIndex === 0) {
+            return PathView.Negative
+        }
+        if (fromIndex === 0 && toIndex === thumbnailView.count - 1) {
+            return PathView.Positive
+        }
+        return toIndex > fromIndex ? PathView.Positive : PathView.Negative
+    }
+
+    function setCurrentIndexWrapped(nextIndex) {
+        if (!thumbnailView || thumbnailView.count <= 0) {
+            return
+        }
+
+        nextIndex = wrappedIndex(nextIndex)
         if (nextIndex < 0 || nextIndex === thumbnailView.currentIndex) {
             return
         }
 
-        syncMovementDirection(nextIndex)
+        thumbnailView.movementDirection = movementDirectionForTransition(thumbnailView.currentIndex, nextIndex)
         correctingCurrentIndex = true
         thumbnailView.currentIndex = nextIndex
         tabBox.currentIndex = nextIndex
         correctingCurrentIndex = false
     }
 
-    function advanceSweep() {
-        if (!thumbnailView || thumbnailView.count <= 1) {
+    function stepCurrentIndex(delta) {
+        if (!thumbnailView || thumbnailView.count <= 0) {
             return
         }
-
-        var current = clampIndex(thumbnailView.currentIndex)
-        if (current <= 0) {
-            sweepDirection = 1
-        } else if (current >= thumbnailView.count - 1) {
-            sweepDirection = -1
-        }
-
-        var next = current + sweepDirection
-        if (next >= thumbnailView.count) {
-            sweepDirection = -1
-            next = thumbnailView.count - 2
-        } else if (next < 0) {
-            sweepDirection = 1
-            next = 1
-        }
-
-        setCurrentIndexNoWrap(next)
+        setCurrentIndexWrapped(thumbnailView.currentIndex + delta)
     }
 
     function refreshPanelReserve() {
@@ -382,20 +403,17 @@ KWin.TabBoxSwitcher {
                                 thumbnailView.model.activate(index)
                                 return
                             }
-                            tabBox.setCurrentIndexNoWrap(index)
+                            tabBox.setCurrentIndexWrapped(index)
                         }
                     }
                 }
 
-                onMovementStarted: movementDirection = PathView.Shortest
                 Keys.onPressed: function(event) {
-                    if (event.key === Qt.Key_Tab
-                            || event.key === Qt.Key_Backtab
-                            || event.key === Qt.Key_Left
-                            || event.key === Qt.Key_Right
-                            || event.key === Qt.Key_Up
-                            || event.key === Qt.Key_Down) {
-                        tabBox.advanceSweep()
+                    if (event.key === Qt.Key_Tab || event.key === Qt.Key_Right || event.key === Qt.Key_Down) {
+                        tabBox.stepCurrentIndex(1)
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Backtab || event.key === Qt.Key_Left || event.key === Qt.Key_Up) {
+                        tabBox.stepCurrentIndex(-1)
                         event.accepted = true
                     }
                 }
@@ -436,12 +454,13 @@ KWin.TabBoxSwitcher {
         Item {
             id: morphLayer
             property var windowId: undefined
+            property real windowAspect: window.width / Math.max(1, window.height)
             property bool active: false
             property bool animationsEnabled: false
             property int animationDuration: 220
 
-            width: parent.width
-            height: parent.height
+            width: window.width
+            height: window.height
             transformOrigin: Item.TopLeft
             visible: active
             z: 50
@@ -460,7 +479,11 @@ KWin.TabBoxSwitcher {
                 enabled: morphLayer.animationsEnabled
                 NumberAnimation { duration: morphLayer.animationDuration; easing.type: Easing.OutCubic }
             }
-            Behavior on scale {
+            Behavior on width {
+                enabled: morphLayer.animationsEnabled
+                NumberAnimation { duration: morphLayer.animationDuration; easing.type: Easing.OutCubic }
+            }
+            Behavior on height {
                 enabled: morphLayer.animationsEnabled
                 NumberAnimation { duration: morphLayer.animationDuration; easing.type: Easing.OutCubic }
             }
@@ -490,18 +513,25 @@ KWin.TabBoxSwitcher {
             return
         }
 
-        if (thumbnailView.count <= 1) {
-            thumbnailView.currentIndex = clampIndex(currentIndex)
+        if (thumbnailView.count <= 0) {
             return
         }
 
-        advanceSweep()
+        var nextIndex = wrappedIndex(currentIndex)
+        if (nextIndex < 0 || nextIndex === thumbnailView.currentIndex) {
+            return
+        }
+
+        thumbnailView.movementDirection = movementDirectionForTransition(thumbnailView.currentIndex, nextIndex)
+        correctingCurrentIndex = true
+        thumbnailView.currentIndex = nextIndex
+        tabBox.currentIndex = nextIndex
+        correctingCurrentIndex = false
     }
 
     onVisibleChanged: {
         if (visible) {
             refreshPanelReserve()
-            sweepDirection = 1
             window.visible = true
             restartFadeIn()
             Qt.callLater(function() { tabBox.startOpenMorph() })
