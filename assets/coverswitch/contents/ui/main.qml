@@ -83,11 +83,16 @@ KWin.TabBoxSwitcher {
             return null
         }
 
-        var w = Math.round(thumbnailView.width * thumbnailView.previewRatio)
-        var aspect = (morphLayer.windowAspect && morphLayer.windowAspect > 0)
-                   ? morphLayer.windowAspect
-                   : (window.width / Math.max(1, window.height))
-        var h = Math.round(w / Math.max(0.0001, aspect))
+        var item = thumbnailView.currentItem
+        if (!item || item.width <= 0 || item.height <= 0) {
+            return null
+        }
+
+        var pathScale = (item.PathView && item.PathView.scale) ? item.PathView.scale : 1.0
+        var effectiveScale = item.scale && item.scale > 0 ? item.scale : pathScale
+        effectiveScale = Math.max(effectiveScale, pathScale)
+        var w = Math.round(item.width * effectiveScale)
+        var h = Math.round(item.height * effectiveScale)
         return {
             x: Math.round((window.width - w) / 2),
             y: Math.round((window.height - h) / 2),
@@ -202,6 +207,29 @@ KWin.TabBoxSwitcher {
         return toIndex > fromIndex ? PathView.Positive : PathView.Negative
     }
 
+    function highlightMoveDistance(fromIndex, toIndex) {
+        if (!thumbnailView || thumbnailView.count <= 1 || fromIndex === toIndex) {
+            return 0
+        }
+        if ((fromIndex === thumbnailView.count - 1 && toIndex === 0)
+                || (fromIndex === 0 && toIndex === thumbnailView.count - 1)) {
+            return thumbnailView.count - 1
+        }
+        return Math.abs(fromIndex - toIndex)
+    }
+
+    function prepareHighlightMove(fromIndex, toIndex) {
+        if (!thumbnailView) {
+            return
+        }
+
+        var distance = highlightMoveDistance(fromIndex, toIndex)
+        var duration = Math.max(thumbnailView.baseHighlightMoveDuration, distance * 160)
+        thumbnailView.highlightMoveDuration = duration
+        highlightDurationResetTimer.interval = duration + 40
+        highlightDurationResetTimer.restart()
+    }
+
     function setCurrentIndexWrapped(nextIndex) {
         if (!thumbnailView || thumbnailView.count <= 0) {
             return
@@ -212,7 +240,9 @@ KWin.TabBoxSwitcher {
             return
         }
 
-        thumbnailView.movementDirection = movementDirectionForTransition(thumbnailView.currentIndex, nextIndex)
+        var fromIndex = thumbnailView.currentIndex
+        thumbnailView.movementDirection = movementDirectionForTransition(fromIndex, nextIndex)
+        prepareHighlightMove(fromIndex, nextIndex)
         correctingCurrentIndex = true
         thumbnailView.currentIndex = nextIndex
         tabBox.currentIndex = nextIndex
@@ -310,7 +340,8 @@ KWin.TabBoxSwitcher {
                 preferredHighlightBegin: 0.5
                 preferredHighlightEnd: 0.5
                 highlightRangeMode: PathView.StrictlyEnforceRange
-                highlightMoveDuration: 220
+                readonly property int baseHighlightMoveDuration: 220
+                highlightMoveDuration: baseHighlightMoveDuration
                 pathItemCount: 7
 
                 path: Path {
@@ -506,6 +537,13 @@ KWin.TabBoxSwitcher {
                 }
             }
         }
+
+        Timer {
+            id: highlightDurationResetTimer
+            interval: thumbnailView ? thumbnailView.baseHighlightMoveDuration : 220
+            repeat: false
+            onTriggered: if (thumbnailView) thumbnailView.highlightMoveDuration = thumbnailView.baseHighlightMoveDuration
+        }
     }
 
     onCurrentIndexChanged: {
@@ -522,7 +560,9 @@ KWin.TabBoxSwitcher {
             return
         }
 
-        thumbnailView.movementDirection = movementDirectionForTransition(thumbnailView.currentIndex, nextIndex)
+        var fromIndex = thumbnailView.currentIndex
+        thumbnailView.movementDirection = movementDirectionForTransition(fromIndex, nextIndex)
+        prepareHighlightMove(fromIndex, nextIndex)
         correctingCurrentIndex = true
         thumbnailView.currentIndex = nextIndex
         tabBox.currentIndex = nextIndex

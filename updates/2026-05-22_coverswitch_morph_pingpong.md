@@ -37,11 +37,52 @@ scale, rotation, and highlight positioning at render time, so the inner
 thumbnail's mapped logical geometry can be smaller than the rendered center
 card and offset from it.
 
-The replacement computes the target from the stable center-card measurements:
-`thumbnailView.width * thumbnailView.previewRatio` for width, the current
-thumbnail aspect ratio when available, and centered `x/y` within the switcher
-window. That makes the open morph land at the same visual center as the
-PathPercent `0.50` card with `PathView.scale = 1.0`.
+The replacement now uses the live delegate root as the size source instead of
+the earlier `thumbnailView.width * thumbnailView.previewRatio` width-only
+formula. The delegate root is the rendered card container:
+
+```qml
+width: thumbnailView.boxWidth
+height: thumbnailView.boxHeight
+scale: PathView.onPath ? openScale * PathView.scale : 0
+```
+
+So the target rect is:
+
+```text
+width  = thumbnailView.currentItem.width  * effectiveScale
+height = thumbnailView.currentItem.height * effectiveScale
+```
+
+where `effectiveScale` is the delegate's live `scale`, with `PathView.scale`
+as the lower bound. The lower bound avoids targeting the temporary 0.8
+open-scale while the switcher is still appearing. The rect is still recentered
+inside the switcher window instead of trusting `mapToItem()` for position,
+because the center card must stay visually centered.
+
+On the current full-HD-ish layout this means the center target is the rendered
+delegate card box, approximately `window.width * 0.45` by
+`window.height * 0.45`, multiplied by center `PathView.scale = 1.0`, rather
+than a window-aspect-derived thumbnail rectangle.
+
+## Wrap animation smoothing
+
+Wrap direction remains cyclic and reversed at the ends: last-to-first uses
+`PathView.Negative`, and first-to-last uses `PathView.Positive`.
+
+To smooth the visible rewind, each index transition now sets
+`PathView.highlightMoveDuration` from the travel distance before changing the
+index:
+
+```text
+duration = max(220 ms, distance * 160 ms)
+```
+
+Adjacent moves therefore stay at 220 ms. A wrap across `N` windows gets
+`(N - 1) * 160 ms`, then a timer restores the base 220 ms after the move.
+This keeps PathView's own movement model, avoiding a manual `offset`
+animation because offset wrapping is fragile with `pathItemCount`,
+`preferredHighlightBegin`, and explicit `movementDirection`.
 
 ## Compromises
 
@@ -49,15 +90,15 @@ PathPercent `0.50` card with `PathView.scale = 1.0`.
   KWin owns the actual client surfaces on Wayland, so QML can only mirror a
   window into the tabbox surface.
 - If the current delegate is not available early during open, the morph aspect
-  falls back to the switcher window aspect.
+  is unavailable and the morph is skipped for that frame instead of guessing
+  from the switcher window aspect.
 - Mouse clicks still jump directly to the clicked card, but the transition now
   uses the same explicit movement-direction rule as keyboard navigation.
 
 ## Preserved behavior
 
 - No card path geometry, rotations, scale waypoints, preview ratio, dim layer,
-  color palette, runtime panel reserve, or `PathView.highlightMoveDuration`
-  values were changed.
+  color palette, or runtime panel reserve values were changed.
 
 ## Smoke test
 
