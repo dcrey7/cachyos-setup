@@ -17,8 +17,8 @@ was rejected and has been superseded.
 - On open, the mirror starts at the full switcher surface size and animates
   into a deterministic center-card rect over 220 ms with
   `Easing.OutCubic`.
-- On close, the same center-card rect is used immediately, then the
-  mirror animates back to full surface size over 180 ms while fading out.
+- The QML morph is now open-only. Close zoom is owned by the separate KWin
+  JavaScript effect added in Round 13.
 - The morph layer now animates `x`, `y`, `width`, and `height` directly, so
   non-screen-shaped windows can land on the exact center-card rectangle.
 - The existing card fade remains, and the delegate open-scale animation is
@@ -89,9 +89,8 @@ thumbnail exposes no usable dimensions.
 The temporary red transparent target outline from the diagnostic round was
 deleted. The `coverswitch center-card-rect ...` journal logging remains.
 
-The active morph layer also refreshes when the current index changes, so
-tabbing to a different window while the morph is still visible retargets the
-mirror to the newly selected card dimensions.
+The Round 12 active-morph retargeting behavior was later superseded because
+it left the `z: 50` mirror covering the PathView during navigation.
 
 ## Round 8 follow-up: close morph activation path
 
@@ -118,13 +117,17 @@ enumeration is now also logged on QML component creation with the prefix
 `coverswitch tabBox.` and explicitly logs the type of
 `tabBox.model.activate`.
 
-Enter, keypad Enter, and Space now call `confirmSelection(event)`, which:
+At the time, Enter, keypad Enter, and Space called `confirmSelection(event)`,
+which:
 
 1. accepts the key event;
 2. starts the close morph from the settled center-card rect to full switcher
    size over 180 ms;
 3. waits on `closeMorphCompleteTimer`;
 4. calls `tabBox.model.activate(thumbnailView.currentIndex)`.
+
+This Enter/Space QML close path was later removed in Round 14 after the
+Round 13 KWin effect took ownership of close zooms.
 
 Alt-release remains compositor-limited: once KWin starts hiding the tabbox,
 the QML surface is torn down too quickly for a close animation to be visible.
@@ -267,13 +270,10 @@ Manual evidence to collect after Alt+Tab then releasing Alt, without Enter:
 journalctl --user -b 0 --no-pager -g 'coverswitch.signal|coverswitch.win|coverswitch.fn|coverswitch.sig|coverswitch model type' | tail -80
 ```
 
-Decision-tree status for this patch: Plan B, live tracking. No hook has been
-wired yet because no timestamp evidence exists for a signal that fires before
-`coverswitch.signal visibleChanged=false`. Instead, the morph mirror now stays
-active on the selected card after the open animation and continues to retarget
-on selection changes. If KWin still tears down immediately on Alt-release, the
-last QML frame it can render has the mirror at the card position rather than
-having no morph layer at all.
+Decision-tree status for that patch was Plan B, live tracking. That approach
+has now been superseded by the Round 13 compositor-owned close effect and was
+removed from the QML. Keeping the `z: 50` mirror alive over the PathView hid
+the real card animation during Tab navigation.
 
 If the new log shows a signal before `coverswitch.signal visibleChanged=false`,
 that signal can replace Plan B: trigger the 180 ms close morph and delay
@@ -333,3 +333,26 @@ calibration. The compositor animation uses `Effect.Size`,
 `reconfigure`, and asks the Effects D-Bus interface to load the effect. A
 logout/login is still the cleanest validation path for a newly installed user
 effect.
+
+## Round 14 follow-up: transient open morph
+
+The QML morph layer is now a one-shot open transition again. On each new
+switcher open, `startOpenMorph()` stops any previous fade timer/animation,
+reactivates the mirror, sets opacity to `1`, places it at the full switcher
+surface, then animates it to the current center-card rect over 220 ms.
+
+After the open target is set, `morphFadeOutTimer` starts with a 250 ms
+interval. When it fires, `morphLayer.fadeOut()` runs a 120 ms
+`NumberAnimation` from the current opacity to `0`; when the fade stops at
+zero, `morphLayer.active = false`, which removes it through
+`visible: active`.
+
+The Round 12 live tracking hook was removed from both keyboard-driven wrapped
+navigation and `onCurrentIndexChanged`. The morph no longer changes
+`windowId` or retargets itself during Tab navigation, so the PathView cards
+and their own movement animation are visible after the open fade.
+
+The QML close morph and its Enter/Space delay timer were removed. Enter,
+keypad Enter, and Space now call `tabBox.model.activate(index)` directly; the
+Round 13 KWin effect owns the close zoom through `tabBoxClosed` and falls
+back to the new active window if needed.

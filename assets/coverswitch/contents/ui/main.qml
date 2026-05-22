@@ -18,7 +18,6 @@ KWin.TabBoxSwitcher {
     property bool fadeInStarted: false
     property int panelReserve: __PANEL_RESERVE__
     property bool correctingCurrentIndex: false
-    property bool closeMorphPending: false
     property bool tabBoxApiDumped: false
 
     readonly property int rawScreenWidth: Math.max(
@@ -240,30 +239,6 @@ KWin.TabBoxSwitcher {
         morphLayer.scale = 1
     }
 
-    function refreshMorphTargetForCurrentIndex(reason) {
-        if (!tabBox.visible || !morphLayer.active || !thumbnailView || thumbnailView.count <= 0) {
-            return
-        }
-
-        Qt.callLater(function() {
-            if (!tabBox.visible || !morphLayer.active || !thumbnailView || thumbnailView.count <= 0) {
-                return
-            }
-
-            var idx = clampIndex(thumbnailView.currentIndex)
-            var wId = windowIdForIndex(idx)
-            var rect = rectForCenterCard()
-            if (wId === undefined || wId === null || !rect) {
-                return
-            }
-
-            updateMorphAspect(idx)
-            morphLayer.windowId = wId
-            setMorphToRect(rect, 160, true)
-            logCenterCardRect(reason)
-        })
-    }
-
     function startOpenMorph() {
         if (!tabBox.visible || !thumbnailView || thumbnailView.count <= 0) {
             return
@@ -279,7 +254,8 @@ KWin.TabBoxSwitcher {
         }
 
         updateMorphAspect(idx)
-        morphHideTimer.stop()
+        morphFadeOutTimer.stop()
+        morphFadeAnim.stop()
         morphLayer.windowId = wId
         morphLayer.active = true
         morphLayer.opacity = 1
@@ -295,45 +271,17 @@ KWin.TabBoxSwitcher {
                 return
             }
             setMorphToRect(rect, 220, true)
-        })
-    }
-
-    function startCloseMorph() {
-        if (!thumbnailView || thumbnailView.count <= 0) {
-            return
-        }
-
-        var wId = windowIdForIndex(thumbnailView.currentIndex)
-        updateMorphAspect(thumbnailView.currentIndex)
-        var rect = rectForCenterCard()
-        if (wId === undefined || wId === null || !rect) {
-            return
-        }
-
-        morphHideTimer.stop()
-        morphLayer.windowId = wId
-        morphLayer.active = true
-        morphLayer.opacity = 1
-        setMorphToRect(rect, 0, false)
-
-        Qt.callLater(function() {
-            if (!morphLayer.active) {
-                return
-            }
-            setMorphFull(180, true)
-            morphLayer.opacity = 0
+            morphFadeOutTimer.restart()
         })
     }
 
     function commitCurrentSelection() {
         if (!thumbnailView || thumbnailView.count <= 0 || !tabBox.model || !tabBox.model.activate) {
-            closeMorphPending = false
             return
         }
 
         var idx = clampIndex(thumbnailView.currentIndex)
         if (idx >= 0) {
-            closeMorphPending = false
             tabBox.model.activate(idx)
         }
     }
@@ -342,13 +290,7 @@ KWin.TabBoxSwitcher {
         if (event) {
             event.accepted = true
         }
-        if (closeMorphPending) {
-            return
-        }
-
-        closeMorphPending = true
-        startCloseMorph()
-        closeMorphCompleteTimer.restart()
+        commitCurrentSelection()
     }
 
     function wrappedIndex(idx) {
@@ -414,7 +356,6 @@ KWin.TabBoxSwitcher {
         thumbnailView.currentIndex = nextIndex
         tabBox.currentIndex = nextIndex
         correctingCurrentIndex = false
-        refreshMorphTargetForCurrentIndex("setCurrentIndexWrapped")
     }
 
     function stepCurrentIndex(delta) {
@@ -674,6 +615,13 @@ KWin.TabBoxSwitcher {
             property bool animationsEnabled: false
             property int animationDuration: 220
 
+            function fadeOut() {
+                morphFadeAnim.stop()
+                morphFadeAnim.from = morphLayer.opacity
+                morphFadeAnim.to = 0
+                morphFadeAnim.start()
+            }
+
             width: window.width
             height: window.height
             transformOrigin: Item.TopLeft
@@ -702,31 +650,30 @@ KWin.TabBoxSwitcher {
                 enabled: morphLayer.animationsEnabled
                 NumberAnimation { duration: morphLayer.animationDuration; easing.type: Easing.OutCubic }
             }
-            Behavior on opacity {
-                NumberAnimation {
-                    duration: 180
-                    easing.type: Easing.OutCubic
-                    onRunningChanged: if (!running && morphLayer.opacity === 0) morphLayer.active = false
+
+            NumberAnimation {
+                id: morphFadeAnim
+                target: morphLayer
+                property: "opacity"
+                duration: 120
+                easing.type: Easing.OutCubic
+                onStopped: {
+                    if (morphLayer.opacity === 0) {
+                        morphLayer.active = false
+                    }
                 }
             }
         }
 
         Timer {
-            id: morphHideTimer
-            interval: 240
+            id: morphFadeOutTimer
+            interval: 250
             repeat: false
             onTriggered: {
                 if (tabBox.visible) {
-                    morphLayer.opacity = 0
+                    morphLayer.fadeOut()
                 }
             }
-        }
-
-        Timer {
-            id: closeMorphCompleteTimer
-            interval: 180
-            repeat: false
-            onTriggered: tabBox.commitCurrentSelection()
         }
 
         Timer {
@@ -797,7 +744,6 @@ KWin.TabBoxSwitcher {
         thumbnailView.currentIndex = nextIndex
         tabBox.currentIndex = nextIndex
         correctingCurrentIndex = false
-        refreshMorphTargetForCurrentIndex("onCurrentIndexChanged")
     }
 
     onVisibleChanged: {
@@ -805,13 +751,12 @@ KWin.TabBoxSwitcher {
             refreshPanelReserve()
             window.visible = true
             restartFadeIn()
-            closeMorphPending = false
             Qt.callLater(function() { tabBox.logCenterCardRect("onVisibleChanged") })
             Qt.callLater(function() { tabBox.startOpenMorph() })
         } else {
-            morphHideTimer.stop()
-            closeMorphCompleteTimer.stop()
-            closeMorphPending = false
+            morphFadeOutTimer.stop()
+            morphFadeAnim.stop()
+            morphLayer.active = false
             fadeInStarted = false
             Qt.callLater(function() {
                 correctingCurrentIndex = true
