@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # CachyOS / KDE Plasma 6 desktop tweaks:
-#   - Taskbar: flush with bottom, height 40
+#   - Taskbar: flush with bottom edge
 #   - Darkly application style with transparent widgets
 #   - WhiteSur-Dark window decoration, traffic-light buttons on the RIGHT
 #   - Magic Lamp minimize effect (700ms duration, independent of global anim speed)
 #   - Eye candy: Wobbly Windows (drag), Glide (open), Sheet (dialogs)
 #   - Blur tuning, translucent Breeze Dark panel, centered KRunner
+#   - Custom Kickoff application-menu icon
 #   - Transparent Konsole profile
 #   - Fade Desktop animation when switching virtual desktops (replaces Slide)
 #   - Cube effect via kdeplasma-addons (Meta+C to activate)
@@ -17,10 +18,11 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-echo "==> 0/11  Sanity checks"
+echo "==> 0/12  Sanity checks"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ASSETS_DIR="$REPO_DIR/assets"
+appletsrc="$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc"
 FORCE_DARKLY=0
 for arg in "$@"; do
   case "$arg" in
@@ -59,7 +61,7 @@ done
 echo "    All required tools present."
 
 # ---------------------------------------------------------------------------
-echo "==> 1/11  Backup current config"
+echo "==> 1/12  Backup current config"
 ts="$(date +%Y%m%d-%H%M%S)"
 backup_dir="$HOME/.config/cachyos-setup-backup-$ts"
 mkdir -p "$backup_dir"
@@ -73,7 +75,7 @@ ln -sfn "$backup_dir" "$HOME/.config/cachyos-setup-backup-latest"
 echo "    Latest backup symlinked at ~/.config/cachyos-setup-backup-latest"
 
 # ---------------------------------------------------------------------------
-echo "==> 2/11  WhiteSur-kde theme (AUR)"
+echo "==> 2/12  WhiteSur-kde theme (AUR)"
 if pacman -Qi whitesur-kde-theme >/dev/null 2>&1; then
   echo "    Already installed."
   echo "installed_by_us=0" > "$backup_dir/whitesur.state"
@@ -87,7 +89,7 @@ if [[ ! -d /usr/share/aurorae/themes/WhiteSur-dark && ! -d "$HOME/.local/share/a
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 3/11  Darkly application style + transparent widgets"
+echo "==> 3/12  Darkly application style + transparent widgets"
 if [[ -f /usr/lib/qt6/plugins/styles/darkly6.so && "$FORCE_DARKLY" -eq 0 ]]; then
   echo "    Darkly already installed. Use --force-darkly to rebuild."
 else
@@ -122,7 +124,7 @@ kwriteconfig6 --file darklyrc --group Style --key DolphinViewOpacity 100
 echo "    Darkly widget style applied; Breeze Dark desktop theme keeps panels translucent."
 
 # ---------------------------------------------------------------------------
-echo "==> 4/11  Window decoration + buttons-on-right"
+echo "==> 4/12  Window decoration + buttons-on-right"
 kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key library  "org.kde.kwin.aurorae"
 kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key theme    "__aurorae__svg__WhiteSur-dark"
 # Letters: M=menu, I=minimize, A=maximize, X=close. Left-to-right within each side.
@@ -131,7 +133,7 @@ kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key ButtonsOnRight 
 echo "    WhiteSur-dark; menu on left, min/max/close on right"
 
 # ---------------------------------------------------------------------------
-echo "==> 5/11  KWin effects (Magic Lamp + Wobbly/Glide/Sheet + Fade Desktop + Cube)"
+echo "==> 5/12  KWin effects (Magic Lamp + Wobbly/Glide/Sheet + Fade Desktop + Cube)"
 
 # Make sure kdeplasma-addons is installed (it provides the Cube effect on
 # Plasma 6 -- the classic one was removed and rewritten as a QML addon).
@@ -181,7 +183,7 @@ qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect blur >/dev/null 2>&
 echo "    Effects loaded: magiclamp(700ms), wobbly, glide, sheet, fadedesktop, cube, blur"
 
 # ---------------------------------------------------------------------------
-echo "==> 6/11  Cover Switch + Flip Switch tabbox layouts (rescued from KDE MR !91)"
+echo "==> 6/12  Cover Switch + Flip Switch tabbox layouts (rescued from KDE MR !91)"
 #
 # Honest context: the 3D Cover Switch / Flip Switch from KDE 4.x/5.x was REMOVED
 # in Plasma 6 and there is NO replacement in the official KDE Store, AUR, or
@@ -201,6 +203,88 @@ ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/assets"
 TABBOX_DIR="$HOME/.local/share/kwin/tabbox"
 mkdir -p "$TABBOX_DIR"
 
+panel_reserve=""
+panel_reserve_source=""
+
+is_positive_int() {
+  [[ "$1" =~ ^[0-9]+$ && "$1" -gt 0 ]]
+}
+
+panel_reserve="$(
+  qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript '
+    var p = panels().find(function(p){ return p.location === "bottom"; });
+    if (p) print(p.height);
+  ' 2>/dev/null | grep -E '^[0-9]+$' | head -1
+)" || true
+
+if is_positive_int "$panel_reserve"; then
+  panel_reserve_source="live"
+else
+  panel_reserve=""
+  mapfile -t bottom_panel_ids < <(
+    awk '
+      function remember_panel() {
+        if (id != "" && is_panel && location == "4" && !seen[id]++) {
+          print id
+        }
+      }
+
+      /^\[Containments\]\[[0-9]+\]$/ {
+        remember_panel()
+        id = $0
+        sub(/^\[Containments\]\[/, "", id)
+        sub(/\]$/, "", id)
+        is_panel = 0
+        location = ""
+        next
+      }
+
+      /^\[/ {
+        remember_panel()
+        id = ""
+        is_panel = 0
+        location = ""
+        next
+      }
+
+      id != "" && /^plugin=org\.kde\.panel$/ {
+        is_panel = 1
+        next
+      }
+
+      id != "" && /^location=4$/ {
+        location = "4"
+        next
+      }
+
+      END {
+        remember_panel()
+      }
+    ' "$appletsrc" 2>/dev/null
+  )
+
+  for panel_id in "${bottom_panel_ids[@]}"; do
+    candidate="$(
+      kreadconfig6 --file plasmashellrc \
+        --group "PlasmaViews" \
+        --group "Panel $panel_id" \
+        --group "Defaults" \
+        --key thickness 2>/dev/null
+    )" || true
+    if is_positive_int "$candidate"; then
+      panel_reserve="$candidate"
+      panel_reserve_source="plasmashellrc"
+      break
+    fi
+  done
+fi
+
+if ! is_positive_int "$panel_reserve"; then
+  panel_reserve=44
+  panel_reserve_source="default"
+fi
+echo "    Cover Switch fallback panel reserve: ${panel_reserve}px (${panel_reserve_source}); QML refreshes from KWin clientArea at runtime"
+
 for layout in coverswitch flipswitch; do
   src="$ASSETS_DIR/$layout"
   dest="$TABBOX_DIR/$layout"
@@ -211,6 +295,10 @@ for layout in coverswitch flipswitch; do
   rm -rf "$dest"
   mkdir -p "$dest"
   cp -r "$src"/* "$dest/"
+  if [[ "$layout" == "coverswitch" ]]; then
+    sed "s/__PANEL_RESERVE__/$panel_reserve/g" \
+      "$src/contents/ui/main.qml" > "$dest/contents/ui/main.qml"
+  fi
   echo "    installed $layout -> $dest"
 done
 
@@ -237,10 +325,9 @@ cat <<EOF
 EOF
 
 # ---------------------------------------------------------------------------
-echo "==> 7/11  Panel: flush + height 40 + translucent + battery percentage"
+echo "==> 7/12  Panel: non-floating + translucent + battery percentage"
 # Find the systemtray containment and the battery child-applet ID dynamically,
 # so this works on any Plasma 6 layout (IDs differ per system).
-appletsrc="$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc"
 
 # Parse the INI to find both the battery applet path (3 levels deep, inside
 # systemtray) and the digital-clock applet path (2 levels deep, direct child
@@ -335,30 +422,33 @@ if [[ "${#PANEL_IDS[@]}" -gt 0 ]]; then
       --group "Containments" --group "$panel_id" \
       --group "General" \
       --key panelOpacity 2
+    kwriteconfig6 --file plasmashellrc \
+      --group "PlasmaViews" --group "Panel $panel_id" \
+      --key floating --type bool false
   done
   echo "    Panel opacity: translucent for containment IDs ${PANEL_IDS[*]}"
+  echo "    Panel floating: false for containment IDs ${PANEL_IDS[*]}"
 else
-  echo "    WARNING: No panel containments found for panelOpacity." >&2
+  echo "    WARNING: No panel containments found for panelOpacity/floating." >&2
 fi
 
 nohup kstart plasmashell >/dev/null 2>&1 & disown
 sleep 3
 
-# Panel size + floating via scripting API (works post-restart)
+# Panel floating via scripting API (works post-restart)
 qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript '
   for (var id of panelIds) {
     var p = panelById(id);
     p.floating = false;
-    p.height   = 40;
   }
-' >/dev/null 2>&1 && echo "    Panel: floating=false, height=40"
+' >/dev/null 2>&1 && echo "    Panel: floating=false"
 
 kwriteconfig6 --file krunnerrc --group General --key FreeFloating --type bool true
 kwriteconfig6 --file krunnerrc --group General --key Position Center
 echo "    KRunner: centered free-floating launcher"
 
 # ---------------------------------------------------------------------------
-echo "==> 8/11  Touchpad: enable natural scrolling"
+echo "==> 8/12  Touchpad: enable natural scrolling"
 # Per-device libinput config in ~/.config/kcminputrc. Enumerates touchpad-class
 # devices via /sys/class/input and writes NaturalScroll=true for each.
 touched_any=0
@@ -384,7 +474,63 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 9/11  Konsole transparent profile"
+echo "==> 9/12  Kickoff custom application-menu icon"
+kickoff_icon_assets="$ASSETS_DIR/icons"
+kickoff_icon_src="$kickoff_icon_assets/applicationMenu-nhsoft.svg"
+kickoff_icon_dir="$HOME/.local/share/icons/cachyos-setup"
+kickoff_icon_dest="$kickoff_icon_dir/applicationMenu-nhsoft.svg"
+
+if [[ -f "$kickoff_icon_src" ]]; then
+  mkdir -p "$kickoff_icon_dir"
+  cp "$kickoff_icon_src" "$kickoff_icon_dest"
+
+  mapfile -t KICKOFF_APPLETS < <(python3 - "$appletsrc" <<'PY'
+import re, sys
+path = sys.argv[1]
+flat_re = re.compile(r"^\[Containments\]\[(\d+)\]\[Applets\]\[(\d+)\]$")
+plugin_re = re.compile(r"^plugin=(.+)$")
+
+section = None
+try:
+    with open(path) as f:
+        for line in f:
+            line = line.rstrip()
+            m = flat_re.match(line)
+            if m:
+                section = m.groups()
+                continue
+            if line.startswith("["):
+                section = None
+                continue
+            m = plugin_re.match(line)
+            if m and section:
+                if m.group(1) == "org.kde.plasma.kickoff":
+                    print(*section)
+                section = None
+except FileNotFoundError:
+    pass
+PY
+)
+
+  if [[ "${#KICKOFF_APPLETS[@]}" -gt 0 ]]; then
+    for applet_path in "${KICKOFF_APPLETS[@]}"; do
+      read -r panel_id applet_id <<< "$applet_path"
+      kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+        --group "Containments" --group "$panel_id" \
+        --group "Applets" --group "$applet_id" \
+        --group "Configuration" --group "General" \
+        --key icon "$kickoff_icon_dest"
+      echo "    Kickoff icon: Containments[$panel_id]/Applets[$applet_id]"
+    done
+  else
+    echo "    WARNING: No Kickoff applets found; icon asset installed only." >&2
+  fi
+else
+  echo "    WARNING: Kickoff icon asset missing under $kickoff_icon_assets; skipping." >&2
+fi
+
+# ---------------------------------------------------------------------------
+echo "==> 10/12  Konsole transparent profile"
 konsole_assets="$ASSETS_DIR/konsole"
 konsole_dir="$HOME/.local/share/konsole"
 if [[ -f "$konsole_assets/Transparent.profile" && -f "$konsole_assets/WhiteOnBlackTransparent.colorscheme" ]]; then
@@ -398,7 +544,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 10/11  VSCode native title bar (if installed)"
+echo "==> 11/12  VSCode native title bar (if installed)"
 vscode_settings="$HOME/.config/Code/User/settings.json"
 if [[ -d "$HOME/.config/Code" ]]; then
   mkdir -p "$(dirname "$vscode_settings")"
@@ -421,7 +567,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 11/11  Install zsh-setup"
+echo "==> 12/12  Install zsh-setup"
 zsh_setup_dir="$HOME/zsh-setup"
 if [[ ! -d "$zsh_setup_dir" ]]; then
   if git clone --depth=1 https://github.com/dcrey7/zsh-setup.git "$zsh_setup_dir"; then

@@ -16,37 +16,71 @@ KWin.TabBoxSwitcher {
     id: tabBox
     currentIndex: thumbnailView ? thumbnailView.currentIndex : -1
     property bool fadeInStarted: false
+    property int panelReserve: __PANEL_RESERVE__
+
+    readonly property int rawScreenWidth: Math.max(
+        Screen.width,
+        tabBox.screenGeometry.width,
+        Screen.desktopAvailableWidth)
+    readonly property int rawScreenHeight: Math.max(
+        Screen.height,
+        tabBox.screenGeometry.height,
+        Screen.desktopAvailableHeight)
 
     function restartFadeIn() {
         fadeInStarted = false
         Qt.callLater(function() { if (tabBox.visible) fadeInStarted = true })
     }
 
+    function refreshPanelReserve() {
+        try {
+            var output = KWin.Workspace.screenAt(Qt.point(
+                tabBox.screenGeometry.x + tabBox.screenGeometry.width / 2,
+                tabBox.screenGeometry.y + tabBox.screenGeometry.height / 2))
+            var desktop = KWin.Workspace.currentDesktop
+            var areaOption = KWin.MaximizeArea !== undefined ? KWin.MaximizeArea : 2
+            var available = KWin.Workspace.clientArea(areaOption, output, desktop)
+            var bottomReserve = (tabBox.screenGeometry.y + rawScreenHeight) - (available.y + available.height)
+
+            if (bottomReserve >= 0 && bottomReserve < rawScreenHeight) {
+                panelReserve = Math.round(bottomReserve)
+            }
+        } catch (e) {
+            panelReserve = __PANEL_RESERVE__
+        }
+    }
+
     Window {
         id: window
         x: tabBox.screenGeometry.x
         y: tabBox.screenGeometry.y
-        width: Math.max(Screen.width, tabBox.screenGeometry.width, Screen.desktopAvailableWidth)
-        height: Math.max(1, Math.max(Screen.height, tabBox.screenGeometry.height, Screen.desktopAvailableHeight) - 40)
+        width: tabBox.rawScreenWidth
+        height: Math.max(1, tabBox.rawScreenHeight - tabBox.panelReserve)
         flags: Qt.BypassWindowManagerHint | Qt.FramelessWindowHint
         visibility: Window.Windowed
-        visible: true
+        visible: tabBox.visible
         color: "transparent"
 
-        Component.onCompleted: tabBox.restartFadeIn()
+        Component.onCompleted: {
+            tabBox.refreshPanelReserve()
+            if (tabBox.visible) tabBox.restartFadeIn()
+        }
 
         KWin.DesktopBackground {
             id: desktopBackground
             width: Screen.width; height: Screen.height
-            activity: KWin.Workspace.currentActivity; outputName: window.screen.name
+            activity: KWin.Workspace.currentActivity
+            output: KWin.Workspace.screenAt(Qt.point(
+                tabBox.screenGeometry.x + tabBox.screenGeometry.width / 2,
+                tabBox.screenGeometry.y + tabBox.screenGeometry.height / 2))
             z: -10
 
             Binding {
                 target: desktopBackground
                 property: "desktop"
-                value: KWin.Workspace.currentVirtualDesktop
-                when: KWin.Workspace.currentVirtualDesktop !== undefined
-                      && KWin.Workspace.currentVirtualDesktop !== null
+                value: KWin.Workspace.currentDesktop
+                when: KWin.Workspace.currentDesktop !== undefined
+                      && KWin.Workspace.currentDesktop !== null
             }
         }
 
@@ -224,6 +258,7 @@ KWin.TabBoxSwitcher {
 
     onVisibleChanged: {
         if (visible) {
+            refreshPanelReserve()
             window.visible = true; restartFadeIn()
         } else {
             fadeInStarted = false

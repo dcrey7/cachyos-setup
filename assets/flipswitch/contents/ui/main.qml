@@ -30,17 +30,27 @@ KWin.TabBoxSwitcher {
         height: tabBox.screenGeometry.height
         flags: Qt.Popup | Qt.BypassWindowManagerHint | Qt.FramelessWindowHint
         visibility: Window.FullScreen
-        visible: true
+        visible: tabBox.visible
         color: "transparent"
 
         Accessible.name: thumbnailView.currentItem ? thumbnailView.currentItem.caption : ""
 
         KWin.DesktopBackground {
+            id: desktopBackground
             anchors.fill: parent
             activity: KWin.Workspace.currentActivity
-            desktop: KWin.Workspace.currentVirtualDesktop
-            outputName: window.screen.name
+            output: KWin.Workspace.screenAt(Qt.point(
+                tabBox.screenGeometry.x + tabBox.screenGeometry.width / 2,
+                tabBox.screenGeometry.y + tabBox.screenGeometry.height / 2))
             z: -10
+
+            Binding {
+                target: desktopBackground
+                property: "desktop"
+                value: KWin.Workspace.currentDesktop
+                when: KWin.Workspace.currentDesktop !== undefined
+                      && KWin.Workspace.currentDesktop !== null
+            }
         }
 
         Kirigami.PlaceholderMessage {
