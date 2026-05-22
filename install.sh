@@ -347,7 +347,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 8/13  Panel: non-floating + translucent + battery percentage"
+echo "==> 8/13  Panel: non-floating + translucent + centered taskbar + battery percentage"
 # Find the systemtray containment and the battery child-applet ID dynamically,
 # so this works on any Plasma 6 layout (IDs differ per system).
 
@@ -404,11 +404,12 @@ if [[ -n "$BAT_AID" ]]; then
 fi
 TRAY_AID="$BAT_TRAY_AID"  # systemtray is the parent of the battery applet
 
-# Plasmashell holds the in-memory state and overwrites file on graceful exit,
-# so SIGKILL it, write the file, then restart. The panel disappears for ~1s.
-echo "    Restarting plasmashell to apply battery + tray config (panel will flicker)..."
-pkill -9 plasmashell 2>/dev/null || true
+# Plasmashell holds in-memory panel state, so stop it before writing panel
+# config and restart it after the updates. The panel disappears for ~1s.
+echo "    Restarting plasmashell to apply panel config (panel will flicker)..."
+kquitapp6 plasmashell 2>/dev/null || true
 sleep 1
+pkill -9 plasmashell 2>/dev/null || true
 
 if [[ -n "$BAT_AID" ]]; then
   kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
@@ -450,6 +451,145 @@ if [[ "${#PANEL_IDS[@]}" -gt 0 ]]; then
   done
   echo "    Panel opacity: translucent for containment IDs ${PANEL_IDS[*]}"
   echo "    Panel floating: false for containment IDs ${PANEL_IDS[*]}"
+
+  next_panel_applet_id="$(python3 - "$appletsrc" <<'PY'
+import re
+import sys
+
+max_id = 0
+applet_re = re.compile(r"\[Applets\]\[(\d+)\]")
+try:
+    with open(sys.argv[1], encoding="utf-8") as f:
+        for line in f:
+            for match in applet_re.finditer(line):
+                max_id = max(max_id, int(match.group(1)))
+except FileNotFoundError:
+    pass
+print(max_id + 1)
+PY
+)"
+
+  centered_any=0
+  for panel_id in "${PANEL_IDS[@]}"; do
+    applet_order_raw="$(kreadconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+      --group "Containments" --group "$panel_id" \
+      --group "General" \
+      --key AppletOrder 2>/dev/null || true)"
+    [[ -n "$applet_order_raw" ]] || continue
+
+    IFS=';' read -r -a applet_order <<< "$applet_order_raw"
+    icontasks_id=""
+    icontasks_index=-1
+    spacer_count=0
+    spacer_ids=()
+
+    for i in "${!applet_order[@]}"; do
+      applet_id="${applet_order[$i]}"
+      [[ -n "$applet_id" ]] || continue
+      plugin="$(kreadconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+        --group "Containments" --group "$panel_id" \
+        --group "Applets" --group "$applet_id" \
+        --key plugin 2>/dev/null || true)"
+      if [[ "$plugin" == "org.kde.plasma.icontasks" && -z "$icontasks_id" ]]; then
+        icontasks_id="$applet_id"
+        icontasks_index="$i"
+      elif [[ "$plugin" == "org.kde.plasma.panelspacer" ]]; then
+        spacer_ids+=("$applet_id")
+        spacer_count=$((spacer_count + 1))
+      fi
+    done
+
+    if [[ -z "$icontasks_id" ]]; then
+      echo "    Panel $panel_id: no icontasks applet; leaving custom panel order unchanged"
+      continue
+    fi
+
+    if (( spacer_count >= 2 )); then
+      echo "    Panel $panel_id: already has ${spacer_count} panel spacers"
+      continue
+    fi
+
+    left_plugin=""
+    right_plugin=""
+    if (( icontasks_index > 0 )); then
+      left_id="${applet_order[$((icontasks_index - 1))]}"
+      left_plugin="$(kreadconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+        --group "Containments" --group "$panel_id" \
+        --group "Applets" --group "$left_id" \
+        --key plugin 2>/dev/null || true)"
+    fi
+    if (( icontasks_index < ${#applet_order[@]} - 1 )); then
+      right_id="${applet_order[$((icontasks_index + 1))]}"
+      right_plugin="$(kreadconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+        --group "Containments" --group "$panel_id" \
+        --group "Applets" --group "$right_id" \
+        --key plugin 2>/dev/null || true)"
+    fi
+
+    need_left=0
+    need_right=0
+    [[ "$left_plugin" == "org.kde.plasma.panelspacer" ]] || need_left=1
+    [[ "$right_plugin" == "org.kde.plasma.panelspacer" ]] || need_right=1
+    if (( need_left == 0 && need_right == 0 )); then
+      echo "    Panel $panel_id: icontasks already flanked by panel spacers"
+      continue
+    fi
+
+    left_spacer_id=""
+    right_spacer_id=""
+    reused_spacer_id=""
+    if (( spacer_count == 1 && need_left == 1 && need_right == 1 )); then
+      reused_spacer_id="${spacer_ids[0]}"
+      left_spacer_id="$reused_spacer_id"
+    fi
+
+    if (( need_left == 1 )) && [[ -z "$left_spacer_id" ]]; then
+      left_spacer_id="$next_panel_applet_id"
+      next_panel_applet_id=$((next_panel_applet_id + 1))
+    fi
+    if (( need_right == 1 )); then
+      right_spacer_id="$next_panel_applet_id"
+      next_panel_applet_id=$((next_panel_applet_id + 1))
+    fi
+
+    for new_spacer_id in "$left_spacer_id" "$right_spacer_id"; do
+      [[ -n "$new_spacer_id" && "$new_spacer_id" != "$reused_spacer_id" ]] || continue
+      kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+        --group "Containments" --group "$panel_id" \
+        --group "Applets" --group "$new_spacer_id" \
+        --key immutability 1
+      kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+        --group "Containments" --group "$panel_id" \
+        --group "Applets" --group "$new_spacer_id" \
+        --key plugin "org.kde.plasma.panelspacer"
+    done
+
+    new_order=()
+    for applet_id in "${applet_order[@]}"; do
+      [[ -n "$applet_id" ]] || continue
+      [[ -n "$reused_spacer_id" && "$applet_id" == "$reused_spacer_id" ]] && continue
+      if [[ "$applet_id" == "$icontasks_id" ]]; then
+        [[ -n "$left_spacer_id" ]] && new_order+=("$left_spacer_id")
+        new_order+=("$applet_id")
+        [[ -n "$right_spacer_id" ]] && new_order+=("$right_spacer_id")
+      else
+        new_order+=("$applet_id")
+      fi
+    done
+    new_order_raw="$(IFS=';'; echo "${new_order[*]}")"
+
+    if [[ "$new_order_raw" != "$applet_order_raw" ]]; then
+      kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+        --group "Containments" --group "$panel_id" \
+        --group "General" \
+        --key AppletOrder "$new_order_raw"
+      centered_any=1
+      echo "    Panel $panel_id: centered icontasks AppletOrder -> $new_order_raw"
+    fi
+  done
+  if (( centered_any == 0 )); then
+    echo "    Panel taskbar spacers: no changes needed"
+  fi
 else
   echo "    WARNING: No panel containments found for panelOpacity/floating." >&2
 fi
