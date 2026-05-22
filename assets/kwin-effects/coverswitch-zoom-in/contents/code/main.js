@@ -11,7 +11,7 @@ var coverSwitchZoomInEffect = {
     animationActive: false,
     sessionStartWindow: null,
     expectingActivation: false,
-    expirationTimer: null,
+    expirationDeadline: 0,
 
     loadConfig: function () {
         coverSwitchZoomInEffect.duration = animationTime(180);
@@ -106,7 +106,7 @@ var coverSwitchZoomInEffect = {
         coverSwitchZoomInEffect.sessionActive = true;
         coverSwitchZoomInEffect.sessionStartWindow = effects.activeWindow;
         coverSwitchZoomInEffect.expectingActivation = false;
-        coverSwitchZoomInEffect.cancelExpiration();
+        coverSwitchZoomInEffect.expirationDeadline = 0;
         console.log("coverswitch-zoom-in sessionStartWindow="
             + (effects.activeWindow ? effects.activeWindow.caption : "null"));
     },
@@ -127,17 +127,24 @@ var coverSwitchZoomInEffect = {
         }
         coverSwitchZoomInEffect.sessionActive = false;
         coverSwitchZoomInEffect.expectingActivation = true;
+        coverSwitchZoomInEffect.expirationDeadline = Date.now() + 400;
 
         console.log("coverswitch-zoom-in tabBoxClosed (arming windowActivated catch)");
-        coverSwitchZoomInEffect.scheduleExpiration(400);
     },
 
     onWindowActivated: function (window) {
         if (!coverSwitchZoomInEffect.expectingActivation) {
             return;
         }
+        if (Date.now() > coverSwitchZoomInEffect.expirationDeadline) {
+            console.log("coverswitch-zoom-in expiration: no windowActivated within 400ms");
+            coverSwitchZoomInEffect.expectingActivation = false;
+            coverSwitchZoomInEffect.expirationDeadline = 0;
+            coverSwitchZoomInEffect.sessionStartWindow = null;
+            return;
+        }
         coverSwitchZoomInEffect.expectingActivation = false;
-        coverSwitchZoomInEffect.cancelExpiration();
+        coverSwitchZoomInEffect.expirationDeadline = 0;
 
         console.log("coverswitch-zoom-in windowActivated post-tabbox window="
             + (window ? window.caption : "null")
@@ -158,26 +165,6 @@ var coverSwitchZoomInEffect = {
 
         coverSwitchZoomInEffect.sessionStartWindow = null;
         coverSwitchZoomInEffect.runZoomIn(window);
-    },
-
-    scheduleExpiration: function (ms) {
-        coverSwitchZoomInEffect.cancelExpiration();
-        coverSwitchZoomInEffect.expirationTimer = Qt.setTimeout(function () {
-            if (coverSwitchZoomInEffect.expectingActivation) {
-                console.log("coverswitch-zoom-in expiration: no windowActivated within "
-                    + ms + "ms");
-            }
-            coverSwitchZoomInEffect.expectingActivation = false;
-            coverSwitchZoomInEffect.expirationTimer = null;
-        }, ms);
-    },
-
-    cancelExpiration: function () {
-        if (coverSwitchZoomInEffect.expirationTimer) {
-            // KWin's QJSEngine has no clearTimeout equivalent. The pending
-            // closure expires naturally; expectingActivation is the gate.
-            coverSwitchZoomInEffect.expirationTimer = null;
-        }
     },
 
     runZoomIn: function (window) {
@@ -254,7 +241,7 @@ var coverSwitchZoomInEffect = {
     resetSession: function () {
         coverSwitchZoomInEffect.sessionActive = false;
         coverSwitchZoomInEffect.expectingActivation = false;
-        coverSwitchZoomInEffect.cancelExpiration();
+        coverSwitchZoomInEffect.expirationDeadline = 0;
         coverSwitchZoomInEffect.sessionStartWindow = null;
     },
 

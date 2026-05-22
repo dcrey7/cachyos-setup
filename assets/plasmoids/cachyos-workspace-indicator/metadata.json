@@ -1,0 +1,20 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "abhishek01789@gmail.com",
+                "Name": "dcrey7"
+            }
+        ],
+        "Category": "Windows and Tasks",
+        "Description": "Numbered circular virtual desktop indicators",
+        "Icon": "preferences-desktop-virtual-desktops",
+        "Id": "cachyos.workspace-indicator",
+        "License": "GPL-2.0-or-later",
+        "Name": "CachyOS Workspace Indicator",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-MainScript": "ui/main.qml"
+}

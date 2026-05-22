@@ -405,6 +405,14 @@ KWin.TabBoxSwitcher {
             }
         }
 
+        Rectangle {
+            id: safeBackdrop
+            width: Screen.width
+            height: Screen.height
+            color: "#1a1a1a"
+            z: -11
+        }
+
         KWin.DesktopBackground {
             id: desktopBackground
             width: Screen.width; height: Screen.height
@@ -420,6 +428,14 @@ KWin.TabBoxSwitcher {
                 value: KWin.Workspace.currentDesktop
                 when: KWin.Workspace.currentDesktop !== undefined
                       && KWin.Workspace.currentDesktop !== null
+            }
+
+            Component.onCompleted: {
+                console.log("coverswitch DesktopBackground activity=" + KWin.Workspace.currentActivity
+                            + " desktop=" + KWin.Workspace.currentDesktop
+                            + " screenAt result=" + KWin.Workspace.screenAt(Qt.point(
+                                tabBox.screenGeometry.x + tabBox.screenGeometry.width / 2,
+                                tabBox.screenGeometry.y + tabBox.screenGeometry.height / 2)))
             }
         }
 
@@ -659,7 +675,12 @@ KWin.TabBoxSwitcher {
                 easing.type: Easing.OutCubic
                 onStopped: {
                     if (morphLayer.opacity === 0) {
+                        console.log("coverswitch morph fade animation stopped, opacity="
+                                    + morphLayer.opacity + " setting active=false")
+                        morphLayer.opacity = 0
                         morphLayer.active = false
+                        morphLayer.windowId = undefined
+                        console.log("coverswitch morph FULLY cleaned up")
                     }
                 }
             }
@@ -671,6 +692,8 @@ KWin.TabBoxSwitcher {
             repeat: false
             onTriggered: {
                 if (tabBox.visible) {
+                    console.log("coverswitch morph fade-out timer fired, current opacity="
+                                + morphLayer.opacity)
                     morphLayer.fadeOut()
                 }
             }
@@ -757,6 +780,8 @@ KWin.TabBoxSwitcher {
             morphFadeOutTimer.stop()
             morphFadeAnim.stop()
             morphLayer.active = false
+            morphLayer.opacity = 0
+            morphLayer.windowId = undefined
             fadeInStarted = false
             Qt.callLater(function() {
                 correctingCurrentIndex = true

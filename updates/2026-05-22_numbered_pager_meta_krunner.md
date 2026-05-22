@@ -1,18 +1,24 @@
-# Numbered pager and Meta-to-KRunner automation
+# Circular workspace indicator and Meta-to-KRunner automation
 
-`install.sh` now configures existing `org.kde.plasma.pager` panel applets to
-show desktop numbers instead of miniature desktop previews:
+`install.sh` now installs a tiny Plasma 6 plasmoid at:
 
-```ini
-[Containments][<panel_id>][Applets][<pager_id>][Configuration][General]
-displayedText=Number
-currentDesktopSelected=DoNothing
-showWindowOutlines=false
+```text
+~/.local/share/plasma/plasmoids/cachyos.workspace-indicator
 ```
 
-The pager applet is also reconciled in `AppletOrder` so the first pager on a
-panel sits immediately after Kickoff. Existing spacer and margin-separator
-logic is preserved, and missing pagers are left alone.
+The source lives under `assets/plasmoids/cachyos-workspace-indicator/`. It
+renders virtual desktops as circular numbered buttons with the active desktop
+filled using the Plasma highlight color.
+
+Existing `org.kde.plasma.pager` panel applets are rewritten in-place to use
+`plugin=cachyos.workspace-indicator`, preserving the same applet ID and
+`AppletOrder` slot. If a panel has Kickoff but no pager/indicator, the script
+adds the new applet immediately after Kickoff. Re-running remains idempotent
+and does not duplicate the indicator.
+
+The QML uses `org.kde.taskmanager`'s `VirtualDesktopInfo` for desktop count,
+IDs, and current-desktop tracking on Plasma 6.6. Click activation targets KWin
+desktop numbers through the session's KWin D-Bus endpoint.
 
 The Meta key shortcut is moved from Kickoff to KRunner:
 

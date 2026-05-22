@@ -473,3 +473,56 @@ coverswitch-zoom-in EFFECT signals connected OK
 The fallback candidates `effects.windowActivatedChanged`,
 `effects.activeWindowChanged`, and `effects.activated` were all `undefined` in
 this runtime, so the effect connects directly to `effects.windowActivated`.
+
+## Round 18 follow-up: backdrop fallback and KWin JS timer fix
+
+Journal testing found two regressions after the Round 17 close-zoom work.
+
+The Cover Switch backdrop could show the live application window behind the
+tabbox surface instead of the wallpaper. The QML still has the intended
+wallpaper stack: `KWin.DesktopBackground` at `z: -10` with current activity,
+desktop, and `screenAt(...)` output bindings, then a dim rectangle at `z: -9`.
+Because the root cause is still ambiguous between a failed
+`DesktopBackground.output` binding and stale morph thumbnail painting, the
+layout now includes a guaranteed fallback:
+
+```qml
+Rectangle {
+    id: safeBackdrop
+    width: Screen.width
+    height: Screen.height
+    color: "#1a1a1a"
+    z: -11
+}
+```
+
+This sits behind `KWin.DesktopBackground`, so a working wallpaper remains
+visible. If the wallpaper item fails to render, the compositor no longer shows
+through to live windows. Temporary journal logging was also added for the
+`DesktopBackground` binding values and for the morph fade-out sequence.
+
+The morph cleanup is now more explicit after the fade animation reaches zero:
+
+```qml
+morphLayer.opacity = 0
+morphLayer.active = false
+morphLayer.windowId = undefined
+```
+
+Clearing `windowId` forces the `KWin.WindowThumbnail` mirror to release its
+source instead of retaining a stale live-window thumbnail after the transient
+open morph is hidden.
+
+The `coverswitch-zoom-in` JavaScript effect also no longer calls
+`Qt.setTimeout(...)`. KWin's JS effect runtime in this Plasma session does not
+expose the QML `Qt` global, producing:
+
+```text
+ReferenceError: Qt is not defined
+```
+
+The expiration is now deadline-based. `tabBoxClosed` arms
+`expectingActivation` and stores `expirationDeadline = Date.now() + 400`;
+`onWindowActivated(window)` self-expires if the activation arrives too late.
+The old `scheduleExpiration()`, `cancelExpiration()`, and `expirationTimer`
+state were removed.
