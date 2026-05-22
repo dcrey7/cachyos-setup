@@ -43,7 +43,7 @@ from `0.8` to `1.0` while PathView is also settling its attributes. Sampling
 `item.scale` or `item.PathView.scale` could therefore capture a transient
 value and make the fake morph land smaller or larger than the final card.
 
-The target now uses only the settled card dimensions:
+That round changed the target to use only the settled outer card dimensions:
 
 ```qml
 function rectForCenterCard() {
@@ -58,21 +58,40 @@ function rectForCenterCard() {
 }
 ```
 
-This deliberately targets the post-open center card size. The thumbnail mirror
-and the delegate `openScale` animation run in parallel and converge on the
-same final `boxWidth x boxHeight` card.
+That avoided transient open-scale sampling but still assumed every visible
+thumbnail filled the full `boxWidth x boxHeight` card. Round 10 supersedes that
+target with the current window's fitted thumbnail dimensions.
 
-Temporary diagnostics were added for this round:
+## Round 10 follow-up: per-window morph target
 
-- A red transparent outline is shown for about 1.4 seconds on switcher open at
-  the exact `rectForCenterCard()` target.
-- `console.log()` prints `coverswitch center-card-rect ...` with `x`, `y`,
-  `width`, `height`, `boxWidth`, `boxHeight`, and the switcher window size.
+The fixed `boxWidth x boxHeight` morph target was removed because the visible
+delegate thumbnail is not always that shape. The delegate keeps its outer item
+at `thumbnailView.boxWidth x thumbnailView.boxHeight`, then scales the
+`KWin.WindowThumbnail` inside that box with:
 
-If that outline is still visibly off, the next diagnosis is to gate
-`rectForCenterCard()` behind `thumbnailView.flicking === false &&
-thumbnailView.moving === false` so the diagnostic never samples during a path
-move.
+```qml
+readonly property real thumbnailFitScale: Math.min(
+    width / Math.max(1, thumbnail.implicitWidth),
+    height / Math.max(1, thumbnail.implicitHeight))
+
+KWin.WindowThumbnail {
+    width: Math.round(Math.max(1, implicitWidth) * delegateItem.thumbnailFitScale)
+    height: Math.round(Math.max(1, implicitHeight) * delegateItem.thumbnailFitScale)
+}
+```
+
+`rectForCenterCard()` now mirrors that exact sizing rule. It reads the current
+delegate's `thumbnailItem`, uses `implicitWidth / implicitHeight` as the
+primary source size because that is what the delegate uses, then falls back to
+`sourceSize`, live `width / height`, and finally `1920 / 1080` if the
+thumbnail exposes no usable dimensions.
+
+The temporary red transparent target outline from the diagnostic round was
+deleted. The `coverswitch center-card-rect ...` journal logging remains.
+
+The active morph layer also refreshes when the current index changes, so
+tabbing to a different window while the morph is still visible retargets the
+mirror to the newly selected card dimensions.
 
 ## Round 8 follow-up: close morph activation path
 

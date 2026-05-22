@@ -19,8 +19,6 @@ KWin.TabBoxSwitcher {
     property int panelReserve: __PANEL_RESERVE__
     property bool correctingCurrentIndex: false
     property bool closeMorphPending: false
-    property bool centerRectDebugVisible: false
-    property var centerRectDebugRect: ({ x: 0, y: 0, width: 0, height: 0 })
 
     readonly property int rawScreenWidth: Math.max(
         Screen.width,
@@ -74,22 +72,61 @@ KWin.TabBoxSwitcher {
         }
 
         var thumb = thumbnailView.currentItem.thumbnailItem
-        if (thumb && thumb.width > 0 && thumb.height > 0) {
+        if (thumb && thumb.implicitWidth > 0 && thumb.implicitHeight > 0) {
+            morphLayer.windowAspect = thumb.implicitWidth / Math.max(1, thumb.implicitHeight)
+        } else if (thumb && thumb.sourceSize && thumb.sourceSize.width > 0 && thumb.sourceSize.height > 0) {
+            morphLayer.windowAspect = thumb.sourceSize.width / Math.max(1, thumb.sourceSize.height)
+        } else if (thumb && thumb.width > 0 && thumb.height > 0) {
             morphLayer.windowAspect = thumb.width / Math.max(1, thumb.height)
         } else {
-            morphLayer.windowAspect = window.width / Math.max(1, window.height)
+            morphLayer.windowAspect = 1920 / 1080
         }
     }
 
     function rectForCenterCard() {
-        if (!thumbnailView || window.width <= 0 || window.height <= 0) {
+        if (!thumbnailView || !thumbnailView.currentItem || window.width <= 0 || window.height <= 0) {
             return null
         }
 
-        var w = thumbnailView.boxWidth
-        var h = thumbnailView.boxHeight
-        if (w <= 0 || h <= 0) {
+        var maxW = thumbnailView.boxWidth
+        var maxH = thumbnailView.boxHeight
+        if (maxW <= 0 || maxH <= 0) {
             return null
+        }
+
+        var thumb = thumbnailView.currentItem.thumbnailItem
+        var sourceW = 0
+        var sourceH = 0
+        if (thumb) {
+            if (thumb.implicitWidth > 0 && thumb.implicitHeight > 0) {
+                sourceW = thumb.implicitWidth
+                sourceH = thumb.implicitHeight
+            } else if (thumb.sourceSize && thumb.sourceSize.width > 0 && thumb.sourceSize.height > 0) {
+                sourceW = thumb.sourceSize.width
+                sourceH = thumb.sourceSize.height
+            } else if (thumb.width > 0 && thumb.height > 0) {
+                sourceW = thumb.width
+                sourceH = thumb.height
+            }
+        }
+
+        var w
+        var h
+        if (sourceW > 0 && sourceH > 0) {
+            var fitScale = Math.min(
+                maxW / Math.max(1, sourceW),
+                maxH / Math.max(1, sourceH))
+            w = Math.round(Math.max(1, sourceW) * fitScale)
+            h = Math.round(Math.max(1, sourceH) * fitScale)
+        } else {
+            var aspect = 1920 / 1080
+            if (maxW / aspect <= maxH) {
+                w = maxW
+                h = Math.round(maxW / aspect)
+            } else {
+                w = Math.round(maxH * aspect)
+                h = maxH
+            }
         }
 
         return {
@@ -114,17 +151,6 @@ KWin.TabBoxSwitcher {
                     "boxWidth", thumbnailView.boxWidth,
                     "boxHeight", thumbnailView.boxHeight,
                     "window", window.width + "x" + window.height)
-    }
-
-    function showCenterRectDebug(reason) {
-        var rect = rectForCenterCard()
-        logCenterCardRect(reason)
-        if (!rect) {
-            return
-        }
-        centerRectDebugRect = rect
-        centerRectDebugVisible = true
-        centerRectDebugTimer.restart()
     }
 
     function dumpTabBoxApi() {
@@ -163,6 +189,30 @@ KWin.TabBoxSwitcher {
         morphLayer.width = rect.width
         morphLayer.height = rect.height
         morphLayer.scale = 1
+    }
+
+    function refreshMorphTargetForCurrentIndex(reason) {
+        if (!tabBox.visible || !morphLayer.active || !thumbnailView || thumbnailView.count <= 0) {
+            return
+        }
+
+        Qt.callLater(function() {
+            if (!tabBox.visible || !morphLayer.active || !thumbnailView || thumbnailView.count <= 0) {
+                return
+            }
+
+            var idx = clampIndex(thumbnailView.currentIndex)
+            var wId = windowIdForIndex(idx)
+            var rect = rectForCenterCard()
+            if (wId === undefined || wId === null || !rect) {
+                return
+            }
+
+            updateMorphAspect(idx)
+            morphLayer.windowId = wId
+            setMorphToRect(rect, 160, true)
+            logCenterCardRect(reason)
+        })
     }
 
     function startOpenMorph() {
@@ -316,6 +366,7 @@ KWin.TabBoxSwitcher {
         thumbnailView.currentIndex = nextIndex
         tabBox.currentIndex = nextIndex
         correctingCurrentIndex = false
+        refreshMorphTargetForCurrentIndex("setCurrentIndexWrapped")
     }
 
     function stepCurrentIndex(delta) {
@@ -359,7 +410,7 @@ KWin.TabBoxSwitcher {
             tabBox.dumpTabBoxApi()
             if (tabBox.visible) {
                 tabBox.restartFadeIn()
-                Qt.callLater(function() { tabBox.showCenterRectDebug("Component.onCompleted") })
+                Qt.callLater(function() { tabBox.logCenterCardRect("Component.onCompleted") })
                 Qt.callLater(function() { tabBox.startOpenMorph() })
             }
         }
@@ -566,19 +617,6 @@ KWin.TabBoxSwitcher {
             }
         }
 
-        Rectangle {
-            id: centerRectDebugOutline
-            x: tabBox.centerRectDebugRect.x
-            y: tabBox.centerRectDebugRect.y
-            width: tabBox.centerRectDebugRect.width
-            height: tabBox.centerRectDebugRect.height
-            visible: tabBox.centerRectDebugVisible && tabBox.visible
-            color: "transparent"
-            border.color: "red"
-            border.width: 2
-            z: 49
-        }
-
         Item {
             id: morphLayer
             property var windowId: undefined
@@ -636,13 +674,6 @@ KWin.TabBoxSwitcher {
         }
 
         Timer {
-            id: centerRectDebugTimer
-            interval: 1400
-            repeat: false
-            onTriggered: tabBox.centerRectDebugVisible = false
-        }
-
-        Timer {
             id: closeMorphCompleteTimer
             interval: 180
             repeat: false
@@ -683,6 +714,7 @@ KWin.TabBoxSwitcher {
         thumbnailView.currentIndex = nextIndex
         tabBox.currentIndex = nextIndex
         correctingCurrentIndex = false
+        refreshMorphTargetForCurrentIndex("onCurrentIndexChanged")
     }
 
     onVisibleChanged: {
@@ -691,15 +723,13 @@ KWin.TabBoxSwitcher {
             window.visible = true
             restartFadeIn()
             closeMorphPending = false
-            Qt.callLater(function() { tabBox.showCenterRectDebug("onVisibleChanged") })
+            Qt.callLater(function() { tabBox.logCenterCardRect("onVisibleChanged") })
             Qt.callLater(function() { tabBox.startOpenMorph() })
         } else {
             morphHideTimer.stop()
             closeMorphCompleteTimer.stop()
-            centerRectDebugTimer.stop()
             morphLayer.active = false
             closeMorphPending = false
-            centerRectDebugVisible = false
             fadeInStarted = false
             Qt.callLater(function() {
                 correctingCurrentIndex = true
