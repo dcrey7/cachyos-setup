@@ -31,6 +31,8 @@ bash install.sh --force-darkly
 
 The script creates timestamped backups under `~/.config/cachyos-setup-backup-*` and updates `~/.config/cachyos-setup-backup-latest`.
 
+`bash uninstall.sh` restores those backups when available, removes generated theme/plasmoid/KWin/Konsole assets, resets known fallback defaults, and best-effort runs `~/zsh-setup/uninstall.sh`.
+
 ## Live USB caveat
 
 If this is run from a live session, changes usually do not persist after reboot. Run it from the installed CachyOS system for permanent configuration.
