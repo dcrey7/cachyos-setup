@@ -11,6 +11,8 @@
 #   - Fade Desktop animation when switching virtual desktops (replaces Slide)
 #   - Cube effect via kdeplasma-addons (Meta+C to activate)
 #   - Battery applet: show percentage on icon, force always-visible in tray
+#   - Pager: numbered virtual desktops near Kickoff
+#   - Meta key opens centered KRunner instead of Kickoff
 #   - Auto-patch VSCode to use native title bar (if installed)
 #   - Optional zsh-setup integration
 #
@@ -18,7 +20,7 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-echo "==> 0/13  Sanity checks"
+echo "==> 0/14  Sanity checks"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ASSETS_DIR="$REPO_DIR/assets"
@@ -61,11 +63,11 @@ done
 echo "    All required tools present."
 
 # ---------------------------------------------------------------------------
-echo "==> 1/13  Backup current config"
+echo "==> 1/14  Backup current config"
 ts="$(date +%Y%m%d-%H%M%S)"
 backup_dir="$HOME/.config/cachyos-setup-backup-$ts"
 mkdir -p "$backup_dir"
-for f in kwinrc plasma-org.kde.plasma.desktop-appletsrc kdeglobals darklyrc konsolerc krunnerrc; do
+for f in kwinrc plasma-org.kde.plasma.desktop-appletsrc kglobalshortcutsrc kdeglobals darklyrc konsolerc krunnerrc; do
   if [[ -f "$HOME/.config/$f" ]]; then
     cp "$HOME/.config/$f" "$backup_dir/$f"
     echo "    Backed up $f"
@@ -75,7 +77,7 @@ ln -sfn "$backup_dir" "$HOME/.config/cachyos-setup-backup-latest"
 echo "    Latest backup symlinked at ~/.config/cachyos-setup-backup-latest"
 
 # ---------------------------------------------------------------------------
-echo "==> 2/13  WhiteSur-kde theme (AUR)"
+echo "==> 2/14  WhiteSur-kde theme (AUR)"
 if pacman -Qi whitesur-kde-theme >/dev/null 2>&1; then
   echo "    Already installed."
   echo "installed_by_us=0" > "$backup_dir/whitesur.state"
@@ -89,7 +91,7 @@ if [[ ! -d /usr/share/aurorae/themes/WhiteSur-dark && ! -d "$HOME/.local/share/a
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 3/13  Darkly application style + transparent widgets"
+echo "==> 3/14  Darkly application style + transparent widgets"
 if [[ -f /usr/lib/qt6/plugins/styles/darkly6.so && "$FORCE_DARKLY" -eq 0 ]]; then
   echo "    Darkly already installed. Use --force-darkly to rebuild."
 else
@@ -124,7 +126,7 @@ kwriteconfig6 --file darklyrc --group Style --key DolphinViewOpacity 100
 echo "    Darkly widget style applied; Breeze Dark desktop theme keeps panels translucent."
 
 # ---------------------------------------------------------------------------
-echo "==> 4/13  Window decoration + buttons-on-right"
+echo "==> 4/14  Window decoration + buttons-on-right"
 kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key library  "org.kde.kwin.aurorae"
 kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key theme    "__aurorae__svg__WhiteSur-dark"
 # Letters: M=menu, I=minimize, A=maximize, X=close. Left-to-right within each side.
@@ -133,7 +135,7 @@ kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key ButtonsOnRight 
 echo "    WhiteSur-dark; menu on left, min/max/close on right"
 
 # ---------------------------------------------------------------------------
-echo "==> 5/13  KWin effects (Magic Lamp + Wobbly/Glide/Sheet + Fade Desktop + Cube)"
+echo "==> 5/14  KWin effects (Magic Lamp + Wobbly/Glide/Sheet + Fade Desktop + Cube)"
 
 # Make sure kdeplasma-addons is installed (it provides the Cube effect on
 # Plasma 6 -- the classic one was removed and rewritten as a QML addon).
@@ -183,7 +185,7 @@ qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect blur >/dev/null 2>&
 echo "    Effects loaded: magiclamp(700ms), wobbly, glide, sheet, fadedesktop, cube, blur"
 
 # ---------------------------------------------------------------------------
-echo "==> 6/13  Cover Switch + Flip Switch tabbox layouts (rescued from KDE MR !91)"
+echo "==> 6/14  Cover Switch + Flip Switch tabbox layouts (rescued from KDE MR !91)"
 #
 # Honest context: the 3D Cover Switch / Flip Switch from KDE 4.x/5.x was REMOVED
 # in Plasma 6 and there is NO replacement in the official KDE Store, AUR, or
@@ -325,7 +327,7 @@ cat <<EOF
 EOF
 
 # ---------------------------------------------------------------------------
-echo "==> 7/13  Cover Switch zoom-in close effect"
+echo "==> 7/14  Cover Switch zoom-in close effect"
 
 EFFECT_SRC="$ASSETS_DIR/kwin-effects/coverswitch-zoom-in"
 EFFECT_DEST="$HOME/.local/share/kwin/effects/coverswitch-zoom-in"
@@ -347,7 +349,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 8/13  Panel: non-floating + translucent + centered taskbar + battery percentage"
+echo "==> 8/14  Panel: non-floating + translucent + numbered pager + centered taskbar + battery percentage"
 # Find the systemtray containment and the battery child-applet ID dynamically,
 # so this works on any Plasma 6 layout (IDs differ per system).
 
@@ -451,6 +453,94 @@ if [[ "${#PANEL_IDS[@]}" -gt 0 ]]; then
   done
   echo "    Panel opacity: translucent for containment IDs ${PANEL_IDS[*]}"
   echo "    Panel floating: false for containment IDs ${PANEL_IDS[*]}"
+
+  pager_any=0
+  pager_reordered_any=0
+  for panel_id in "${PANEL_IDS[@]}"; do
+    applet_order_raw="$(kreadconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+      --group "Containments" --group "$panel_id" \
+      --group "General" \
+      --key AppletOrder 2>/dev/null || true)"
+    [[ -n "$applet_order_raw" ]] || continue
+
+    IFS=';' read -r -a applet_order <<< "$applet_order_raw"
+    kickoff_id=""
+    pager_id=""
+    pager_index=-1
+
+    for i in "${!applet_order[@]}"; do
+      applet_id="${applet_order[$i]}"
+      [[ -n "$applet_id" ]] || continue
+      plugin="$(kreadconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+        --group "Containments" --group "$panel_id" \
+        --group "Applets" --group "$applet_id" \
+        --key plugin 2>/dev/null || true)"
+
+      if [[ "$plugin" == "org.kde.plasma.kickoff" && -z "$kickoff_id" ]]; then
+        kickoff_id="$applet_id"
+      elif [[ "$plugin" == "org.kde.plasma.pager" ]]; then
+        if [[ -z "$pager_id" ]]; then
+          pager_id="$applet_id"
+          pager_index="$i"
+        fi
+        current_displayed_text="$(kreadconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+          --group "Containments" --group "$panel_id" \
+          --group "Applets" --group "$applet_id" \
+          --group "Configuration" --group "General" \
+          --key displayedText 2>/dev/null || true)"
+        kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+          --group "Containments" --group "$panel_id" \
+          --group "Applets" --group "$applet_id" \
+          --group "Configuration" --group "General" \
+          --key displayedText "Number"
+        kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+          --group "Containments" --group "$panel_id" \
+          --group "Applets" --group "$applet_id" \
+          --group "Configuration" --group "General" \
+          --key currentDesktopSelected "DoNothing"
+        kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+          --group "Containments" --group "$panel_id" \
+          --group "Applets" --group "$applet_id" \
+          --group "Configuration" --group "General" \
+          --key showWindowOutlines --type bool false
+        pager_any=1
+        if [[ "$current_displayed_text" == "Number" ]]; then
+          echo "    Pager $panel_id/$applet_id: displayedText already Number"
+        else
+          echo "    Pager $panel_id/$applet_id: displayedText=Number, currentDesktopSelected=DoNothing, showWindowOutlines=false"
+        fi
+      fi
+    done
+
+    if [[ -n "$kickoff_id" && -n "$pager_id" ]]; then
+      new_order=()
+      for applet_id in "${applet_order[@]}"; do
+        [[ -n "$applet_id" ]] || continue
+        [[ "$applet_id" == "$pager_id" ]] && continue
+        new_order+=("$applet_id")
+        [[ "$applet_id" == "$kickoff_id" ]] && new_order+=("$pager_id")
+      done
+      new_order_raw="$(IFS=';'; echo "${new_order[*]}")"
+      if [[ "$new_order_raw" != "$applet_order_raw" ]]; then
+        kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+          --group "Containments" --group "$panel_id" \
+          --group "General" \
+          --key AppletOrder "$new_order_raw"
+        pager_reordered_any=1
+        echo "    Panel $panel_id: moved pager $pager_id immediately after Kickoff $kickoff_id -> $new_order_raw"
+      elif (( pager_index >= 0 )); then
+        echo "    Panel $panel_id: pager $pager_id already immediately after Kickoff $kickoff_id"
+      fi
+    elif [[ -n "$pager_id" ]]; then
+      echo "    Panel $panel_id: pager present but no Kickoff applet; leaving order unchanged"
+    fi
+  done
+  if (( pager_any == 0 )); then
+    echo "    Pager: no org.kde.plasma.pager applets found; skipping numbered desktop buttons"
+  fi
+  if (( pager_reordered_any == 0 )); then
+    echo "    Pager order: no changes needed"
+  fi
 
   next_panel_applet_id="$(python3 - "$appletsrc" <<'PY'
 import re
@@ -610,7 +700,39 @@ kwriteconfig6 --file krunnerrc --group General --key Position Center
 echo "    KRunner: centered free-floating launcher"
 
 # ---------------------------------------------------------------------------
-echo "==> 9/13  Touchpad: enable natural scrolling"
+echo "==> 9/14  Keyboard shortcuts: Meta opens KRunner"
+launcher_shortcut_key="activate application launcher"
+launcher_shortcut_current="$(kreadconfig6 --file kglobalshortcutsrc \
+  --group "plasmashell" \
+  --key "$launcher_shortcut_key" 2>/dev/null || true)"
+krunner_shortcut_current="$(kreadconfig6 --file kglobalshortcutsrc \
+  --group "krunner.desktop" \
+  --key "_launch" 2>/dev/null || true)"
+
+kwriteconfig6 --file kglobalshortcutsrc \
+  --group "plasmashell" \
+  --key "$launcher_shortcut_key" \
+  "none,Meta,Activate Application Launcher"
+kwriteconfig6 --file kglobalshortcutsrc \
+  --group "krunner.desktop" \
+  --key "_launch" \
+  "Meta,Alt+Space,Run Command Interface"
+
+echo "    plasmashell/$launcher_shortcut_key: ${launcher_shortcut_current:-<unset>} -> none,Meta,Activate Application Launcher"
+echo "    krunner.desktop/_launch: ${krunner_shortcut_current:-<unset>} -> Meta,Alt+Space,Run Command Interface"
+qdbus6 org.kde.kglobalaccel /component/plasmashell org.kde.kglobalaccel.Component.cleanUp >/dev/null 2>&1 || true
+qdbus6 org.kde.kglobalaccel /component/krunner_desktop org.kde.kglobalaccel.Component.cleanUp >/dev/null 2>&1 || true
+qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
+
+echo "    Restarting plasmashell so Meta shortcut ownership is re-read..."
+kquitapp6 plasmashell 2>/dev/null || true
+sleep 1
+pkill -9 plasmashell 2>/dev/null || true
+nohup kstart plasmashell >/dev/null 2>&1 & disown
+sleep 3
+
+# ---------------------------------------------------------------------------
+echo "==> 10/14  Touchpad: enable natural scrolling"
 # Per-device libinput config in ~/.config/kcminputrc. Enumerates touchpad-class
 # devices via /sys/class/input and writes NaturalScroll=true for each.
 touched_any=0
@@ -636,7 +758,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 10/13  Kickoff custom application-menu icon"
+echo "==> 11/14  Kickoff custom application-menu icon"
 kickoff_icon_assets="$ASSETS_DIR/icons"
 kickoff_icon_src="$kickoff_icon_assets/applicationMenu-nhsoft.svg"
 kickoff_icon_dir="$HOME/.local/share/icons/cachyos-setup"
@@ -692,7 +814,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 11/13  Konsole transparent profile"
+echo "==> 12/14  Konsole transparent profile"
 konsole_assets="$ASSETS_DIR/konsole"
 konsole_dir="$HOME/.local/share/konsole"
 if [[ -f "$konsole_assets/Transparent.profile" && -f "$konsole_assets/WhiteOnBlackTransparent.colorscheme" ]]; then
@@ -706,7 +828,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 12/13  VSCode native title bar (if installed)"
+echo "==> 13/14  VSCode native title bar (if installed)"
 vscode_settings="$HOME/.config/Code/User/settings.json"
 if [[ -d "$HOME/.config/Code" ]]; then
   mkdir -p "$(dirname "$vscode_settings")"
@@ -729,7 +851,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 13/13  Install zsh-setup"
+echo "==> 14/14  Install zsh-setup"
 zsh_setup_dir="$HOME/zsh-setup"
 if [[ ! -d "$zsh_setup_dir" ]]; then
   if git clone --depth=1 https://github.com/dcrey7/zsh-setup.git "$zsh_setup_dir"; then

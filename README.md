@@ -9,8 +9,8 @@ Post-install KDE Plasma 6 tweaks for CachyOS. The installer is idempotent and ca
 - Breeze Dark Plasma desktop theme so `panelOpacity=translucent` actually makes panels see-through.
 - KWin effects: Magic Lamp, Wobbly Windows, Glide, Sheet, Fade Desktop, Cube, tuned blur, and a custom Cover Switch zoom-in activation effect.
 - Cover Switch and Flip Switch tabbox layouts rescued from the KDE MR !91 fork; Cover Switch refreshes the bottom panel reserve from KWin at Alt+Tab runtime, uses thumbnail zoom open/close transitions, and wraps through windows while forcing wrap animations to travel through the stack.
-- Panel layout tweaks, centered taskbar with spacers, non-floating translucent panels, battery percentage, and clock layout.
-- Centered floating KRunner.
+- Panel layout tweaks, numbered virtual desktops next to Kickoff, centered taskbar with spacers, non-floating translucent panels, battery percentage, and clock layout.
+- Centered floating KRunner, with the Meta key bound to open centered search instead of Kickoff.
 - Custom Kickoff application-menu icon from `assets/icons/`.
 - Transparent Konsole profile and colorscheme from `assets/konsole/`.
 - VSCode native title bar settings when VSCode is present.
