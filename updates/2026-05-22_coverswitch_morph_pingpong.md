@@ -356,3 +356,92 @@ The QML close morph and its Enter/Space delay timer were removed. Enter,
 keypad Enter, and Space now call `tabBox.model.activate(index)` directly; the
 Round 13 KWin effect owns the close zoom through `tabBoxClosed` and falls
 back to the new active window if needed.
+
+## Round 15 follow-up: KWin effect diagnostics
+
+Added runtime logging to
+`assets/kwin-effects/coverswitch-zoom-in/contents/code/main.js` so the close
+zoom failure can be separated into package-load, signal, target-selection, and
+animation-shape problems. The effect now logs `init()`, signal types, exposed
+`effects` keys, connect success/failure, every tabbox signal handler, skipped
+animation reasons, computed size/translation values, the returned animation id,
+and animation-end cleanup.
+
+The local Plasma 6.6 scripted effects under `/usr/share/kwin-wayland/effects`
+were checked before patching. `squash` and `maximize` both use the same
+canonical animation shape used here:
+
+```javascript
+{
+    type: Effect.Size,
+    from: { value1: oldWidth, value2: oldHeight },
+    to: { value1: newWidth, value2: newHeight }
+}
+```
+
+`/usr/include/kwin/effect/effecthandler.h` also confirms the effect-side
+signals `tabBoxAdded(int)`, `tabBoxClosed()`, and `tabBoxUpdated()` still exist.
+
+After redeploying to `~/.local/share/kwin/effects/coverswitch-zoom-in` and
+unloading/loading through D-Bus, the journal showed:
+
+```text
+coverswitch-zoom-in EFFECT init called
+coverswitch-zoom-in effects.tabBoxAdded type=function
+coverswitch-zoom-in effects.tabBoxClosed type=function
+coverswitch-zoom-in effects.tabBoxUpdated type=function
+coverswitch-zoom-in effects.currentTabBoxWindow type=undefined
+coverswitch-zoom-in effects.currentTabBoxWindowList type=undefined
+coverswitch-zoom-in EFFECT signals connected OK
+coverswitch-zoom-in loadConfig duration=180
+```
+
+That proves the package is accepted, `init()` is running, and the tabbox signal
+names resolve in this session. The current smoking gun is target discovery:
+`effects.currentTabBoxWindow` and `effects.currentTabBoxWindowList` are not
+exposed to JavaScript on this Plasma 6.6 runtime even though they exist in the
+C++ effect handler API. `Effect` enum keys also do not enumerate through
+`Object.keys()`/`for...in`, so enum availability must be validated by use or
+direct type/value logging rather than key enumeration.
+
+`install.sh` now unloads `coverswitch-zoom-in` before loading it again, so
+rerunning the installer refreshes the user effect script body instead of
+leaving an already-loaded copy in memory.
+
+## Round 16 follow-up: activeWindow close target
+
+The close zoom no longer depends on `effects.currentTabBoxWindow` or
+`effects.currentTabBoxWindowList`. Round 15 diagnostics showed both values are
+`undefined` in Plasma 6.6's scripted-effect JavaScript runtime, so the effect
+could load and connect its signals but never discover a valid target through
+the tabbox-current-window path.
+
+`coverswitch-zoom-in` now snapshots `effects.activeWindow` at `tabBoxAdded` as
+the session start window. `tabBoxUpdated` is intentionally a no-op. On
+`tabBoxClosed`, KWin has already activated the chosen client, so the effect
+reads `effects.activeWindow` again and compares it with the start snapshot. If
+the end window is missing or unchanged, it skips the animation as a dismissed
+or unchanged switcher session. If the end window is different, it calls
+`runZoomIn(endWindow)`.
+
+The animation wrapper now uses the same object shape validated against KWin's
+`squash` and `maximize` effects:
+
+```javascript
+animate({
+    window: window,
+    curve: QEasingCurve.OutCubic,
+    duration: coverSwitchZoomInEffect.duration,
+    keepAlive: false,
+    animations: [
+        { type: Effect.Size,        from: { value1: cardW,     value2: cardH    }, to: { value1: rect.width, value2: rect.height } },
+        { type: Effect.Translation, from: { value1: fromTransX, value2: fromTransY }, to: { value1: 0,          value2: 0 } },
+        { type: Effect.Opacity,     from: 0.85,                                       to: 1.0 }
+    ]
+});
+```
+
+The translation is now a direct offset from the target window's actual
+top-left: `fromTransX = cardX - rect.x` and `fromTransY = cardY - rect.y`.
+That makes the visual start at the center card rectangle before growing into
+the real window geometry.

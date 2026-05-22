@@ -340,6 +340,7 @@ if [[ -d "$EFFECT_SRC" ]]; then
   echo "    Enabled coverswitch-zoom-in"
 
   qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
+  qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect coverswitch-zoom-in >/dev/null 2>&1 || true
   qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect coverswitch-zoom-in >/dev/null 2>&1 || true
 else
   echo "    SKIP  coverswitch-zoom-in: $EFFECT_SRC missing"
