@@ -8,11 +8,11 @@
 #   - Blur tuning, translucent Breeze Dark panel, centered KRunner
 #   - Custom Kickoff application-menu icon
 #   - Transparent Konsole profile
-#   - Fade Desktop animation when switching virtual desktops (replaces Slide)
+#   - Slide animation when switching virtual desktops (Plasma default)
 #   - Cube effect via kdeplasma-addons (Meta+C to activate)
 #   - Battery applet: show percentage on icon, force always-visible in tray
 #   - Custom circular numbered workspace indicator near Kickoff
-#   - Meta key opens centered KRunner instead of Kickoff
+#   - Meta key opens the default CachyOS Kickoff application menu
 #   - Auto-patch VSCode to use native title bar (if installed)
 #   - Optional zsh-setup integration
 #
@@ -273,7 +273,7 @@ kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Window Quick Tile To
 echo "    KWin shortcut: Meta+Up maximizes instead of quick-tiling to top"
 
 # ---------------------------------------------------------------------------
-echo "==> 5/16  KWin effects (Magic Lamp + Wobbly/Glide/Sheet + Fade Desktop + Cube)"
+echo "==> 5/16  KWin effects (Magic Lamp + Wobbly/Glide/Sheet + Slide + Cube)"
 
 # Make sure kdeplasma-addons is installed (it provides the Cube effect on
 # Plasma 6 -- the classic one was removed and rewritten as a QML addon).
@@ -298,10 +298,10 @@ kwriteconfig6 --file kwinrc --group "Plugins" --key wobblywindowsEnabled --type 
 kwriteconfig6 --file kwinrc --group "Plugins" --key glideEnabled         --type bool true
 kwriteconfig6 --file kwinrc --group "Plugins" --key sheetEnabled         --type bool true
 
-# Virtual desktop switching: prefer Fade over the default Slide. Both are
-# built-in and only one can be active at a time.
-kwriteconfig6 --file kwinrc --group "Plugins" --key slideEnabled       --type bool false
-kwriteconfig6 --file kwinrc --group "Plugins" --key fadedesktopEnabled --type bool true
+# Virtual desktop switching: use Slide (Plasma's default). Both are built-in
+# and only one can be active at a time.
+kwriteconfig6 --file kwinrc --group "Plugins" --key slideEnabled       --type bool true
+kwriteconfig6 --file kwinrc --group "Plugins" --key fadedesktopEnabled --type bool false
 
 # Cube (Meta+C activates it). Built-in once kdeplasma-addons is installed.
 kwriteconfig6 --file kwinrc --group "Plugins" --key cubeEnabled --type bool true
@@ -314,14 +314,14 @@ kwriteconfig6 --file kwinrc --group "Effect-blur" --key NoiseStrength 0
 # `KWin reconfigure` rereads kwinrc but does NOT load/unload effects on
 # Wayland -- we have to swap them explicitly via the Effects D-Bus interface.
 qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
-for effect_off in squash slide; do
+for effect_off in squash fadedesktop; do
   qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect "$effect_off" >/dev/null 2>&1 || true
 done
-for effect_on in magiclamp wobblywindows glide sheet fadedesktop cube; do
+for effect_on in magiclamp wobblywindows glide sheet slide cube; do
   qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect "$effect_on" >/dev/null 2>&1 || true
 done
 qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect blur >/dev/null 2>&1 || true
-echo "    Effects loaded: magiclamp(700ms), wobbly, glide, sheet, fadedesktop, cube, blur"
+echo "    Effects loaded: magiclamp(700ms), wobbly, glide, sheet, slide, cube, blur"
 
 # ---------------------------------------------------------------------------
 echo "==> 6/16  Cover Switch + Flip Switch tabbox layouts (rescued from KDE MR !91)"
@@ -925,7 +925,7 @@ kwriteconfig6 --file krunnerrc --group General --key Position Center
 echo "    KRunner: centered free-floating launcher"
 
 # ---------------------------------------------------------------------------
-echo "==> 10/16  Keyboard shortcuts: Meta opens KRunner"
+echo "==> 10/16  Keyboard shortcuts: Meta opens Kickoff (default CachyOS app menu)"
 launcher_shortcut_key="activate application launcher"
 launcher_shortcut_current="$(kreadconfig6 --file kglobalshortcutsrc \
   --group "plasmashell" \
@@ -937,14 +937,14 @@ krunner_shortcut_current="$(kreadconfig6 --file kglobalshortcutsrc \
 kwriteconfig6 --file kglobalshortcutsrc \
   --group "plasmashell" \
   --key "$launcher_shortcut_key" \
-  "none,Meta,Activate Application Launcher"
+  "Meta,Meta,Activate Application Launcher"
 kwriteconfig6 --file kglobalshortcutsrc \
   --group "krunner.desktop" \
   --key "_launch" \
-  "Meta,Alt+Space,Run Command Interface"
+  "Alt+Space,Alt+Space,Run Command Interface"
 
-echo "    plasmashell/$launcher_shortcut_key: ${launcher_shortcut_current:-<unset>} -> none,Meta,Activate Application Launcher"
-echo "    krunner.desktop/_launch: ${krunner_shortcut_current:-<unset>} -> Meta,Alt+Space,Run Command Interface"
+echo "    plasmashell/$launcher_shortcut_key: ${launcher_shortcut_current:-<unset>} -> Meta,Meta,Activate Application Launcher"
+echo "    krunner.desktop/_launch: ${krunner_shortcut_current:-<unset>} -> Alt+Space,Alt+Space,Run Command Interface"
 qdbus6 org.kde.kglobalaccel /component/plasmashell org.kde.kglobalaccel.Component.cleanUp >/dev/null 2>&1 || true
 qdbus6 org.kde.kglobalaccel /component/krunner_desktop org.kde.kglobalaccel.Component.cleanUp >/dev/null 2>&1 || true
 qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
