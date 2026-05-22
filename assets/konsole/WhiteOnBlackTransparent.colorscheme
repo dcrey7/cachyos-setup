@@ -1,11 +1,11 @@
 [Background]
-Color=0,0,0
+Color=12,16,32
 
 [BackgroundFaint]
-Color=0,0,0
+Color=12,16,32
 
 [BackgroundIntense]
-Color=0,0,0
+Color=12,16,32
 
 [Color0]
 Color=0,0,0
@@ -94,5 +94,5 @@ Blur=true
 ColorRandomization=false
 Description=White on Black Transparent
 FillStyle=Tile
-Opacity=0.85
+Opacity=0.78
 Wallpaper=
