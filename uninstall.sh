@@ -298,8 +298,47 @@ fi
 echo "==> 8/15  Centered taskbar spacers"
 if [[ "$restored_applets" -eq 1 ]]; then
   echo "    Original panel layout restored from backup"
+elif [[ -f "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" ]] && have_python; then
+  # Stock Plasma 6 / CachyOS panels do not ship with expanding panelspacer
+  # widgets, so any panelspacer in a panel containment was added by
+  # cachyos-setup (round 19) or by the user via System Settings. Remove them.
+  python3 - "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" <<'PY' || true
+import configparser, re, sys
+p = sys.argv[1]
+cp = configparser.RawConfigParser()
+cp.optionxform = str
+cp.read(p)
+panels = set()
+for s in cp.sections():
+    m = re.fullmatch(r"Containments\]\[(\d+)", s.replace("][", "]["))
+    if m and cp.get(s, "plugin", fallback="") == "org.kde.panel":
+        panels.add(m.group(1))
+removed = []
+for s in list(cp.sections()):
+    m = re.fullmatch(r"Containments\]\[(\d+)\]\[Applets\]\[(\d+)", s.replace("][", "]["))
+    if m and m.group(1) in panels:
+        if cp.get(s, "plugin", fallback="") == "org.kde.plasma.panelspacer":
+            removed.append((m.group(1), m.group(2)))
+            cp.remove_section(s)
+            # also any [Configuration*] subgroups under this applet
+            prefix = f"Containments][{m.group(1)}][Applets][{m.group(2)}]["
+            for s2 in list(cp.sections()):
+                if s2.startswith(prefix):
+                    cp.remove_section(s2)
+# Splice IDs out of AppletOrder for each affected panel
+for pid in panels:
+    sec = f"Containments][{pid}][General"
+    if cp.has_section(sec) and cp.has_option(sec, "AppletOrder"):
+        order = cp.get(sec, "AppletOrder").split(";")
+        bad = {aid for ppid, aid in removed if ppid == pid}
+        order = [x for x in order if x not in bad]
+        cp.set(sec, "AppletOrder", ";".join(order))
+with open(p, "w") as f:
+    cp.write(f, space_around_delimiters=False)
+print(f"    Removed {len(removed)} panelspacer applet(s) from panel containments")
+PY
 else
-  echo "    Leaving panel spacers in place; no reliable marker identifies ours"
+  echo "    Could not access appletsrc; skipping spacer removal"
 fi
 
 # ---------------------------------------------------------------------------
