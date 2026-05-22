@@ -458,6 +458,44 @@ if [[ -n "$CLOCK_AID" ]]; then
 fi
 
 if [[ "${#PANEL_IDS[@]}" -gt 0 ]]; then
+  # Strip cosmetic clutter from panels first: marginsseparator and showdesktop
+  # (peek-at-desktop). Keeps panelspacers — those are added later by the
+  # centered-taskbar reconciliation. Symmetric with uninstall.sh section 8.
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" "${PANEL_IDS[@]}" <<'PY' || true
+import configparser, re, sys
+TARGETS = {
+    "org.kde.plasma.marginsseparator",
+    "org.kde.plasma.showdesktop",
+}
+p = sys.argv[1]
+panels = set(sys.argv[2:])
+cp = configparser.RawConfigParser()
+cp.optionxform = str
+cp.read(p)
+removed = []
+for s in list(cp.sections()):
+    m = re.fullmatch(r"Containments\]\[(\d+)\]\[Applets\]\[(\d+)", s.replace("][", "]["))
+    if m and m.group(1) in panels:
+        if cp.get(s, "plugin", fallback="") in TARGETS:
+            removed.append((m.group(1), m.group(2)))
+            cp.remove_section(s)
+            prefix = f"Containments][{m.group(1)}][Applets][{m.group(2)}]["
+            for s2 in list(cp.sections()):
+                if s2.startswith(prefix):
+                    cp.remove_section(s2)
+for pid in panels:
+    sec = f"Containments][{pid}][General"
+    if cp.has_section(sec) and cp.has_option(sec, "AppletOrder"):
+        order = cp.get(sec, "AppletOrder").split(";")
+        bad = {aid for ppid, aid in removed if ppid == pid}
+        order = [x for x in order if x not in bad]
+        cp.set(sec, "AppletOrder", ";".join(order))
+with open(p, "w") as f:
+    cp.write(f, space_around_delimiters=False)
+print(f"    Stripped {len(removed)} cosmetic applet(s) (marginsseparator/showdesktop)")
+PY
+  fi
   for panel_id in "${PANEL_IDS[@]}"; do
     kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
       --group "Containments" --group "$panel_id" \
