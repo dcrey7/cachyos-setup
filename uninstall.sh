@@ -10,40 +10,59 @@
 #   4. Unload custom KWin effects and restart Plasma shell so deleted QML is not
 #      held in memory.
 #
+# Defaults: full clean. Removes every package install.sh pulled in (AUR themes,
+# kdeplasma-addons, Darkly build deps like cmake/extra-cmake-modules/gcc/make,
+# plus the bootstrap CLI tools), the system Darkly Qt6 style plugin, and the
+# ~/zsh-setup repo. Opt out with --keep-packages / --keep-darkly-binary /
+# --keep-zsh-repo if you want a softer uninstall.
+#
 # Caveats:
 #   - Panel spacers cannot be reliably distinguished from user-created spacers
 #     unless the original appletsrc backup is available. Without that backup,
 #     this script leaves panel spacers in place.
-#   - The system Darkly binary at /usr/lib/qt6/plugins/styles/darkly6.so needs
-#     sudo and has no install marker from install.sh. It is left in place unless
-#     you pass --remove-darkly-binary.
-#   - WhiteSur and kdeplasma-addons packages are left in place by default unless
-#     install.sh's package state marker says this repo installed them and you
-#     pass --remove-packages.
+#   - Build-dep packages that other system packages depend on (e.g. gcc pulled
+#     in by a third-party app) cannot be removed; pacman refuses and we surface
+#     the rejection as a warning rather than aborting.
 #   - Any changes made after install.sh ran but before uninstall.sh runs may be
 #     overwritten when a backup file is restored.
 set -uo pipefail
 
-REMOVE_PACKAGES=0
-REMOVE_DARKLY_BINARY=0
-REMOVE_ZSH_REPO=0
+# Default: full clean — undo everything install.sh did, including packages it
+# pulled in, the system Darkly binary, and the ~/zsh-setup repo. Opt out with
+# the --keep-* flags if you want a softer uninstall.
+REMOVE_PACKAGES=1
+REMOVE_DARKLY_BINARY=1
+REMOVE_ZSH_REPO=1
 YES=0
 
 for arg in "$@"; do
   case "$arg" in
+    # Back-compat with old flags (no-ops now that removal is the default).
     --remove-packages) REMOVE_PACKAGES=1 ;;
     --remove-darkly-binary) REMOVE_DARKLY_BINARY=1 ;;
     --remove-zsh-repo) REMOVE_ZSH_REPO=1 ;;
+    --keep-packages) REMOVE_PACKAGES=0 ;;
+    --keep-darkly-binary) REMOVE_DARKLY_BINARY=0 ;;
+    --keep-zsh-repo) REMOVE_ZSH_REPO=0 ;;
     -y|--yes) YES=1 ;;
     -h|--help)
       cat <<'EOF'
 Usage: bash uninstall.sh [options]
 
+Default behavior: clean wipe. Removes everything install.sh added, including
+AUR packages it installed, the system Darkly Qt6 style plugin, and the
+~/zsh-setup repo (after running its own uninstall.sh).
+
 Options:
   -y, --yes                Do not prompt for confirmation.
-  --remove-packages        Remove packages install.sh marked as installed by it.
-  --remove-darkly-binary   Try to remove /usr/lib/qt6/plugins/styles/darkly6.so.
-  --remove-zsh-repo        Delete ~/zsh-setup after running its uninstall.sh.
+  --keep-packages          Keep AUR/repo packages that install.sh installed
+                           (whitesur-kde-theme, win11-icon-theme-git,
+                           kdeplasma-addons).
+  --keep-darkly-binary     Keep /usr/lib/qt6/plugins/styles/darkly6.so.
+  --keep-zsh-repo          Keep ~/zsh-setup on disk after its uninstall.
+  --remove-packages        (deprecated, default behavior) Remove packages.
+  --remove-darkly-binary   (deprecated, default behavior) Remove Darkly binary.
+  --remove-zsh-repo        (deprecated, default behavior) Remove ~/zsh-setup.
 EOF
       exit 0
       ;;
@@ -58,6 +77,39 @@ backup_link="$HOME/.config/cachyos-setup-backup-latest"
 backup_dir=""
 if [[ -e "$backup_link" ]]; then
   backup_dir="$(readlink -f "$backup_link" 2>/dev/null || printf '%s' "$backup_link")"
+fi
+
+# Global ledger of every package install.sh ever installed (cumulative across
+# runs). Authoritative for package removal; the per-run state files in
+# backup_dir/* remain as a fallback for callers running an older install.sh.
+GLOBAL_PKG_STATE="$HOME/.local/share/cachyos-setup/installed-by-us.list"
+# If the ledger is missing (e.g. uninstall is run after an older install.sh
+# that only wrote per-backup state files), reconstruct it by scanning every
+# backup directory for installed_by_us=1 markers.
+if [[ ! -f "$GLOBAL_PKG_STATE" ]]; then
+  mkdir -p "$(dirname "$GLOBAL_PKG_STATE")"
+  touch "$GLOBAL_PKG_STATE"
+  shopt -s nullglob
+  for d in "$HOME"/.config/cachyos-setup-backup-*/; do
+    [[ -d "$d" ]] || continue
+    if [[ -f "$d/whitesur.state" ]] && grep -q '^installed_by_us=1' "$d/whitesur.state"; then
+      grep -qxF whitesur-kde-theme "$GLOBAL_PKG_STATE" || echo whitesur-kde-theme >> "$GLOBAL_PKG_STATE"
+    fi
+    if [[ -f "$d/kdeplasma-addons.state" ]] && grep -q '^installed_by_us=1' "$d/kdeplasma-addons.state"; then
+      grep -qxF kdeplasma-addons "$GLOBAL_PKG_STATE" || echo kdeplasma-addons >> "$GLOBAL_PKG_STATE"
+    fi
+    if [[ -f "$d/win11-icon.state" ]] && grep -q '^installed_by_us=1' "$d/win11-icon.state"; then
+      grep -qxF win11-icon-theme-git "$GLOBAL_PKG_STATE" || echo win11-icon-theme-git >> "$GLOBAL_PKG_STATE"
+    fi
+    for f in "$d/darkly-build-deps.state" "$d/bootstrap-pkgs.state"; do
+      [[ -f "$f" ]] || continue
+      while IFS= read -r pkg; do
+        [[ -n "$pkg" ]] || continue
+        grep -qxF "$pkg" "$GLOBAL_PKG_STATE" || echo "$pkg" >> "$GLOBAL_PKG_STATE"
+      done < "$f"
+    done
+  done
+  shopt -u nullglob
 fi
 
 warn() {
@@ -145,7 +197,7 @@ if [[ "$YES" -ne 1 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 1/15  Restore backed-up KDE and app settings"
+echo "==> 1/16  Restore backed-up KDE and app settings"
 restored_kwin=0
 restored_applets=0
 restored_shortcuts=0
@@ -163,20 +215,28 @@ restore_config konsolerc && restored_konsole=1
 restore_config krunnerrc && restored_krunner=1
 
 # ---------------------------------------------------------------------------
-echo "==> 2/15  WhiteSur-kde theme package"
-if [[ "$REMOVE_PACKAGES" -eq 1 && -n "$backup_dir" && -f "$backup_dir/whitesur.state" ]] \
+echo "==> 2/16  WhiteSur-kde theme package"
+# Authoritative source is the global ledger; fall back to the per-run state
+# file when the ledger has not been reconstructed yet.
+whitesur_marked=0
+if grep -qxF whitesur-kde-theme "$GLOBAL_PKG_STATE" 2>/dev/null; then
+  whitesur_marked=1
+elif [[ -n "$backup_dir" && -f "$backup_dir/whitesur.state" ]] \
   && grep -q '^installed_by_us=1' "$backup_dir/whitesur.state"; then
+  whitesur_marked=1
+fi
+if [[ "$REMOVE_PACKAGES" -eq 1 && "$whitesur_marked" -eq 1 ]]; then
   if have paru && pacman -Qi whitesur-kde-theme >/dev/null 2>&1; then
     run paru -Rns --noconfirm whitesur-kde-theme
   else
     echo "    whitesur-kde-theme not installed or paru unavailable"
   fi
 else
-  echo "    Leaving WhiteSur package in place by default"
+  echo "    Leaving WhiteSur package in place (not marked installed by us)"
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 3/15  Darkly application style + transparency + Look-and-Feel"
+echo "==> 3/16  Darkly application style + transparency + Look-and-Feel"
 if [[ "$restored_kdeglobals" -eq 0 ]]; then
   write_key --file kdeglobals --group KDE --key widgetStyle Breeze
   if have plasma-apply-colorscheme; then
@@ -228,7 +288,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 4/15  Window decoration + buttons"
+echo "==> 4/16  Window decoration + buttons"
 if [[ "$restored_kwin" -eq 0 ]]; then
   write_key --file kwinrc --group "org.kde.kdecoration2" --key library "org.kde.breeze"
   write_key --file kwinrc --group "org.kde.kdecoration2" --key theme "Breeze"
@@ -239,7 +299,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 5/15  KWin effects + Meta+Up shortcuts"
+echo "==> 5/16  KWin effects + Meta+Up shortcuts"
 if [[ "$restored_kwin" -eq 0 ]]; then
   write_key --file kwinrc --group Plugins --key magiclampEnabled --type bool false
   write_key --file kwinrc --group Plugins --key wobblywindowsEnabled --type bool false
@@ -265,7 +325,7 @@ for on in squash slide blur; do
 done
 
 # ---------------------------------------------------------------------------
-echo "==> 6/15  Cover Switch + Flip Switch tabbox layouts"
+echo "==> 6/16  Cover Switch + Flip Switch tabbox layouts"
 if [[ "$restored_kwin" -eq 0 ]]; then
   write_key --file kwinrc --group TabBox --key LayoutName "org.kde.breeze.desktop"
   write_key --file kwinrc --group TabBoxAlternative --key LayoutName "org.kde.breeze.desktop"
@@ -277,7 +337,7 @@ rm -rf "$HOME/.local/share/kwin/tabbox/coverswitch" "$HOME/.local/share/kwin/tab
 echo "    Removed custom tabbox layout directories if present"
 
 # ---------------------------------------------------------------------------
-echo "==> 7/15  Panel opacity, floating state, battery, and clock"
+echo "==> 7/16  Panel opacity, floating state, battery, and clock"
 if [[ "$restored_applets" -eq 0 ]]; then
   if [[ -f "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" ]] && have python3; then
     python3 - "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" <<'PY' || true
@@ -296,6 +356,8 @@ for section in list(cp.sections()):
             cp[section].pop("shownItems", None)
     if section.endswith("][Configuration][Appearance"):
         cp[section].pop("dateDisplayFormat", None)
+        cp[section].pop("dateFormat", None)
+        cp[section].pop("customDateFormat", None)
 with open(path, "w") as f:
     cp.write(f, space_around_delimiters=False)
 PY
@@ -307,9 +369,14 @@ path = sys.argv[1]
 cp = configparser.ConfigParser(interpolation=None, strict=False)
 cp.optionxform = str
 cp.read(path)
-for section in cp.sections():
+for section in list(cp.sections()):
     if re.fullmatch(r"PlasmaViews\]\[Panel \d+", section):
         cp[section]["floating"] = "true"
+    # Drop install.sh's panel-height override; let plasma fall back to default.
+    if re.fullmatch(r"PlasmaViews\]\[Panel \d+\]\[Defaults", section):
+        cp[section].pop("thickness", None)
+        if not cp[section]:
+            cp.remove_section(section)
 with open(path, "w") as f:
     cp.write(f, space_around_delimiters=False)
 PY
@@ -319,7 +386,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 8/15  Restore stock CachyOS panel layout"
+echo "==> 8/16  Restore stock CachyOS panel layout"
 if [[ "$restored_applets" -eq 1 ]]; then
   echo "    Original panel layout restored from backup"
 elif [[ -f "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" ]] && have_python; then
@@ -435,7 +502,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 9/15  Numbered pager/workspace indicator settings"
+echo "==> 9/16  Numbered pager/workspace indicator settings"
 if [[ "$restored_applets" -eq 0 && -f "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" ]] && have_python; then
   python3 - "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" <<'PY' || true
 import configparser, sys
@@ -455,7 +522,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 10/15  Touchpad natural scrolling"
+echo "==> 10/16  Touchpad natural scrolling"
 if [[ -f "$HOME/.config/kcminputrc" ]] && have python3; then
   python3 - "$HOME/.config/kcminputrc" <<'PY' || true
 import configparser, sys
@@ -475,7 +542,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 11/15  Kickoff custom icon"
+echo "==> 11/16  Kickoff custom icon"
 if [[ "$restored_applets" -eq 0 && -f "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" ]] && have_python; then
   python3 - "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" <<'PY' || true
 import configparser, sys
@@ -496,7 +563,7 @@ rm -rf "$HOME/.local/share/icons/cachyos-setup" 2>/dev/null || warn "Could not r
 echo "    Removed custom Kickoff icon assets"
 
 # ---------------------------------------------------------------------------
-echo "==> 12/15  Workspace indicator plasmoid"
+echo "==> 12/16  Workspace indicator plasmoid"
 if [[ "$restored_applets" -eq 0 && -f "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" ]] && have_python; then
   python3 - "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" <<'PY' || true
 import configparser, sys
@@ -515,7 +582,7 @@ rm -rf "$HOME/.local/share/plasma/plasmoids/cachyos.workspace-indicator" 2>/dev/
 echo "    Removed custom workspace indicator plasmoid"
 
 # ---------------------------------------------------------------------------
-echo "==> 13/15  Cover Switch zoom-in KWin effect"
+echo "==> 13/16  Cover Switch zoom-in KWin effect"
 kwin_effect unloadEffect coverswitch-zoom-in
 if [[ "$restored_kwin" -eq 0 ]]; then
   write_key --file kwinrc --group Plugins --key coverswitch-zoom-inEnabled --type bool false
@@ -524,7 +591,7 @@ rm -rf "$HOME/.local/share/kwin/effects/coverswitch-zoom-in" 2>/dev/null || warn
 echo "    Disabled and removed coverswitch-zoom-in"
 
 # ---------------------------------------------------------------------------
-echo "==> 14/15  Shortcuts, KRunner, Konsole, VSCode, and zsh"
+echo "==> 14/16  Shortcuts, KRunner, Konsole, VSCode, and zsh"
 if [[ "$restored_shortcuts" -eq 0 ]]; then
   write_key --file kglobalshortcutsrc --group plasmashell --key "activate application launcher" "Meta,Meta,Activate Application Launcher"
   write_key --file kglobalshortcutsrc --group "krunner.desktop" --key "_launch" "Alt+Space,Alt+F2,Run Command Interface"
@@ -555,17 +622,74 @@ if [[ "$REMOVE_ZSH_REPO" -eq 1 && -d "$HOME/zsh-setup" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 15/15  Packages and final Plasma/KWin reload"
-if [[ "$REMOVE_PACKAGES" -eq 1 && -n "$backup_dir" && -f "$backup_dir/kdeplasma-addons.state" ]] \
-  && grep -q '^installed_by_us=1' "$backup_dir/kdeplasma-addons.state"; then
-  if pacman -Qi kdeplasma-addons >/dev/null 2>&1; then
-    run sudo pacman -R --noconfirm kdeplasma-addons
+echo "==> 15/16  Win11 icon theme revert"
+# install.sh sets Icons.Theme=Win11* via kdeglobals; if we restored kdeglobals
+# from backup this is already undone. Otherwise force the icon theme back to
+# the CachyOS default (breeze-dark) and clear any stale Win11 references in
+# user-mode kdeglobals.
+if [[ "$restored_kdeglobals" -eq 0 ]]; then
+  current_icons="$(kreadconfig6 --file kdeglobals --group Icons --key Theme 2>/dev/null || true)"
+  if [[ "$current_icons" == Win11* ]]; then
+    write_key --file kdeglobals --group Icons --key Theme breeze-dark
+    if command -v plasma-changeicons >/dev/null 2>&1; then
+      plasma-changeicons breeze-dark >/dev/null 2>&1 || true
+    fi
+    echo "    Icons.Theme: $current_icons -> breeze-dark"
+  fi
+fi
+win11_marked=0
+if grep -qxF win11-icon-theme-git "$GLOBAL_PKG_STATE" 2>/dev/null; then
+  win11_marked=1
+elif [[ -n "$backup_dir" && -f "$backup_dir/win11-icon.state" ]] \
+  && grep -q '^installed_by_us=1' "$backup_dir/win11-icon.state"; then
+  win11_marked=1
+fi
+if [[ "$REMOVE_PACKAGES" -eq 1 && "$win11_marked" -eq 1 ]]; then
+  if have paru && pacman -Qi win11-icon-theme-git >/dev/null 2>&1; then
+    run paru -Rns --noconfirm win11-icon-theme-git
   else
-    echo "    kdeplasma-addons not installed"
+    echo "    win11-icon-theme-git not installed or paru unavailable"
   fi
 else
-  echo "    Leaving kdeplasma-addons in place by default"
+  echo "    Leaving win11-icon-theme-git package in place (not marked installed by us)"
 fi
+
+# ---------------------------------------------------------------------------
+echo "==> 16/16  Ledger-driven package cleanup + final Plasma/KWin reload"
+# Pull the cumulative ledger of "everything install.sh ever installed for us"
+# and remove whatever is still on the system. WhiteSur and Win11 icon theme
+# packages have already been handled in their own sections; we skip them here
+# so we don't double-call pacman.
+already_handled=(whitesur-kde-theme win11-icon-theme-git)
+if [[ "$REMOVE_PACKAGES" -eq 1 && -f "$GLOBAL_PKG_STATE" ]]; then
+  remaining_to_remove=()
+  while IFS= read -r pkg; do
+    [[ -n "$pkg" ]] || continue
+    skip=0
+    for h in "${already_handled[@]}"; do
+      [[ "$pkg" == "$h" ]] && { skip=1; break; }
+    done
+    (( skip )) && continue
+    pacman -Qi "$pkg" >/dev/null 2>&1 && remaining_to_remove+=("$pkg")
+  done < "$GLOBAL_PKG_STATE"
+
+  if (( ${#remaining_to_remove[@]} > 0 )); then
+    echo "    Removing packages from ledger: ${remaining_to_remove[*]}"
+    # -Rns: also removes unneeded deps and config files. pacman refuses if
+    # another package depends on one of these (gcc, make are sometimes pulled
+    # by random dev tooling); we surface that as a warning rather than aborting.
+    if ! run sudo pacman -Rns --noconfirm "${remaining_to_remove[@]}"; then
+      warn "Some ledger packages could not be removed (likely required by other packages). Inspect the pacman output above and remove manually if desired."
+    fi
+  else
+    echo "    Ledger has no remaining packages to remove."
+  fi
+  # Drop the ledger now that it has been consumed.
+  rm -f "$GLOBAL_PKG_STATE"
+elif [[ "$REMOVE_PACKAGES" -eq 1 ]]; then
+  echo "    No installed-by-us ledger found; nothing to remove here."
+fi
+
 if have qdbus6; then
   qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
 fi
