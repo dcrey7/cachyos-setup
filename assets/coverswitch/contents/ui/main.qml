@@ -19,6 +19,7 @@ KWin.TabBoxSwitcher {
     property int panelReserve: __PANEL_RESERVE__
     property bool correctingCurrentIndex: false
     property bool closeMorphPending: false
+    property bool tabBoxApiDumped: false
 
     readonly property int rawScreenWidth: Math.max(
         Screen.width,
@@ -129,9 +130,13 @@ KWin.TabBoxSwitcher {
             }
         }
 
+        var cardCenterY = thumbnailView.centerY ? thumbnailView.centerY : window.height / 2
+        var targetY = Math.round(cardCenterY - h / 2)
+        console.log("coverswitch morph y: " + targetY + " vs cardCenterY: " + cardCenterY)
+
         return {
             x: Math.round((window.width - w) / 2),
-            y: Math.round((window.height - h) / 2),
+            y: targetY,
             width: w,
             height: h
         }
@@ -154,17 +159,55 @@ KWin.TabBoxSwitcher {
     }
 
     function dumpTabBoxApi() {
-        console.log("coverswitch tabBox API enumeration begin")
+        if (tabBoxApiDumped) {
+            return
+        }
+        tabBoxApiDumped = true
+
+        console.log("coverswitch tabBox API enumeration begin t=" + Date.now())
         for (var k in tabBox) {
             try {
-                console.log("coverswitch tabBox." + k + " = " + tabBox[k])
+                if (typeof tabBox[k] === "function") {
+                    console.log("coverswitch.fn  tabBox." + k)
+                } else {
+                    console.log("coverswitch tabBox." + k + " = " + tabBox[k])
+                }
             } catch (e) {
                 console.log("coverswitch tabBox." + k + " = <error " + e + ">")
             }
         }
-        console.log("coverswitch tabBox API enumeration end")
+        for (var sig of ["activate", "accept", "select", "commit", "close", "hide"]) {
+            try {
+                if (tabBox[sig + "ed"]) {
+                    console.log("coverswitch.sig " + sig + "ed exists")
+                }
+            } catch (e) {
+            }
+        }
+        console.log("coverswitch tabBox API enumeration end t=" + Date.now())
         console.log("coverswitch tabBox model.activate type",
                     tabBox.model && tabBox.model.activate ? typeof tabBox.model.activate : "unavailable")
+    }
+
+    function dumpModelApi() {
+        console.log("coverswitch model type: " + tabBox.model + " t=" + Date.now())
+        if (!tabBox.model) {
+            return
+        }
+
+        console.log("coverswitch model API enumeration begin t=" + Date.now())
+        for (var k in tabBox.model) {
+            try {
+                if (typeof tabBox.model[k] === "function") {
+                    console.log("coverswitch.fn  model." + k)
+                } else {
+                    console.log("coverswitch model." + k + " = " + tabBox.model[k])
+                }
+            } catch (e) {
+                console.log("coverswitch model." + k + " = <error " + e + ">")
+            }
+        }
+        console.log("coverswitch model API enumeration end t=" + Date.now())
     }
 
     function setMorphFull(duration, animate) {
@@ -246,7 +289,6 @@ KWin.TabBoxSwitcher {
                 return
             }
             setMorphToRect(rect, 220, true)
-            morphHideTimer.restart()
         })
     }
 
@@ -408,6 +450,7 @@ KWin.TabBoxSwitcher {
         Component.onCompleted: {
             tabBox.refreshPanelReserve()
             tabBox.dumpTabBoxApi()
+            tabBox.dumpModelApi()
             if (tabBox.visible) {
                 tabBox.restartFadeIn()
                 Qt.callLater(function() { tabBox.logCenterCardRect("Component.onCompleted") })
@@ -691,6 +734,40 @@ KWin.TabBoxSwitcher {
                 }
             }
         }
+
+        Connections {
+            target: window
+            ignoreUnknownSignals: true
+
+            function onAboutToHide() {
+                console.log("coverswitch.win aboutToHide t=" + Date.now())
+            }
+
+            function onClosing() {
+                console.log("coverswitch.win closing t=" + Date.now())
+            }
+        }
+    }
+
+    Connections {
+        target: tabBox
+        ignoreUnknownSignals: true
+
+        function onVisibleChanged() {
+            console.log("coverswitch.signal visibleChanged=" + tabBox.visible + " t=" + Date.now())
+        }
+
+        function onCurrentIndexChanged() {
+            console.log("coverswitch.signal currentIndexChanged=" + tabBox.currentIndex + " t=" + Date.now())
+        }
+
+        function onSelectedItemChanged() {
+            console.log("coverswitch.signal selectedItemChanged=" + (tabBox.selectedItem || "") + " t=" + Date.now())
+        }
+
+        function onAboutToHide() {
+            console.log("coverswitch.signal aboutToHide t=" + Date.now())
+        }
     }
 
     onCurrentIndexChanged: {
@@ -728,7 +805,6 @@ KWin.TabBoxSwitcher {
         } else {
             morphHideTimer.stop()
             closeMorphCompleteTimer.stop()
-            morphLayer.active = false
             closeMorphPending = false
             fadeInStarted = false
             Qt.callLater(function() {

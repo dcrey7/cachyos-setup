@@ -174,13 +174,91 @@ movement without the arrival wobble.
   KWin owns the actual client surfaces on Wayland, so QML can only mirror a
   window into the tabbox surface.
 - The close morph is visible for the explicit Enter/Space activation path.
-  Alt-release still snaps because KWin removes the tabbox surface before the
-  QML animation can reach the screen.
+  Alt-release is still under investigation because KWin appears to remove the
+  tabbox surface before a QML animation can reach the screen.
 - If the current delegate is not available early during open, the morph aspect
   is unavailable and the morph is skipped for that frame instead of guessing
   from the switcher window aspect.
 - Mouse clicks still jump directly to the clicked card, but the transition now
   uses the same explicit movement-direction rule as keyboard navigation.
+
+## Round 11 follow-up: open morph Y target
+
+The open morph target no longer centers itself against the whole switcher
+window:
+
+```qml
+y: Math.round((window.height - h) / 2)
+```
+
+That was too low after the panel-visible workaround, because the card deck is
+intentionally above the window midpoint to leave room for the title strip and
+the 40-50 px bottom panel reserve.
+
+`rectForCenterCard()` now uses the actual card path center:
+
+```qml
+var cardCenterY = thumbnailView.centerY ? thumbnailView.centerY : window.height / 2
+var targetY = Math.round(cardCenterY - h / 2)
+```
+
+`thumbnailView.centerY` is a live property in this layout
+(`readonly property real centerY: height * 0.48`), so no mapped delegate
+fallback was needed. X remains screen-centered to avoid pulling in side-card
+PathView offsets.
+
+Temporary confirmation logging was added:
+
+```text
+coverswitch morph y: <targetY> vs cardCenterY: <cardCenterY>
+```
+
+## Round 11 follow-up: Alt-release close reinvestigation
+
+No previous `coverswitch.signal` journal entries existed in the current boot,
+so there was no timestamp evidence to promote a hidden pre-teardown signal yet.
+The QML now logs all candidate teardown signals with timestamps:
+
+```qml
+Connections {
+    target: tabBox
+    ignoreUnknownSignals: true
+    function onVisibleChanged()      { console.log("coverswitch.signal visibleChanged=" + tabBox.visible + " t=" + Date.now()) }
+    function onCurrentIndexChanged() { console.log("coverswitch.signal currentIndexChanged=" + tabBox.currentIndex + " t=" + Date.now()) }
+    function onSelectedItemChanged() { console.log("coverswitch.signal selectedItemChanged=" + (tabBox.selectedItem || "") + " t=" + Date.now()) }
+    function onAboutToHide()         { console.log("coverswitch.signal aboutToHide t=" + Date.now()) }
+}
+```
+
+The switcher window is also watched through `Connections { target: window }`
+for `aboutToHide` and `closing`, using `ignoreUnknownSignals` so the layout
+keeps loading on Plasma builds that do not expose those signals.
+
+Runtime API enumeration was tightened to emit `coverswitch.fn` lines for
+callable properties and now also enumerates `tabBox.model`. Local installed
+QML still only shows the stock thumbnail grid activating selections through
+`tabBox.model.activate(index)`.
+
+Manual evidence to collect after Alt+Tab then releasing Alt, without Enter:
+
+```bash
+journalctl --user -b 0 --no-pager -g 'coverswitch.signal|coverswitch.win|coverswitch.fn|coverswitch.sig|coverswitch model type' | tail -80
+```
+
+Decision-tree status for this patch: Plan B, live tracking. No hook has been
+wired yet because no timestamp evidence exists for a signal that fires before
+`coverswitch.signal visibleChanged=false`. Instead, the morph mirror now stays
+active on the selected card after the open animation and continues to retarget
+on selection changes. If KWin still tears down immediately on Alt-release, the
+last QML frame it can render has the mirror at the card position rather than
+having no morph layer at all.
+
+If the new log shows a signal before `coverswitch.signal visibleChanged=false`,
+that signal can replace Plan B: trigger the 180 ms close morph and delay
+`tabBox.model.activate(index)`. If the only sequence is `visibleChanged=true`
+followed by `visibleChanged=false` and live tracking does not help visually,
+the previous limitation stands and the dead Alt-release close path should be
+removed or replaced with a compositor-owned effect.
 
 ## Preserved behavior
 
