@@ -290,9 +290,12 @@ KWin.TabBoxSwitcher {
         }
 
         var distance = highlightMoveDistance(fromIndex, toIndex)
-        var duration = Math.max(thumbnailView.baseHighlightMoveDuration, distance * 160)
+        var duration = distance > 1
+                ? Math.max(thumbnailView.baseHighlightMoveDuration, distance * 110)
+                : thumbnailView.baseHighlightMoveDuration
         thumbnailView.highlightMoveDuration = duration
-        highlightDurationResetTimer.interval = duration + 40
+        thumbnailView.wrapInProgress = distance > 1
+        highlightDurationResetTimer.interval = duration + 50
         highlightDurationResetTimer.restart()
     }
 
@@ -409,8 +412,19 @@ KWin.TabBoxSwitcher {
                 preferredHighlightEnd: 0.5
                 highlightRangeMode: PathView.StrictlyEnforceRange
                 readonly property int baseHighlightMoveDuration: 220
+                property bool wrapInProgress: false
+                property real activeOvershoot: 1.7
                 highlightMoveDuration: baseHighlightMoveDuration
                 pathItemCount: 7
+
+                Behavior on offset {
+                    enabled: thumbnailView.wrapInProgress
+                    NumberAnimation {
+                        duration: thumbnailView.highlightMoveDuration
+                        easing.type: Easing.OutBack
+                        easing.overshoot: thumbnailView.activeOvershoot
+                    }
+                }
 
                 path: Path {
                     startX: thumbnailView.width * 0.40
@@ -639,7 +653,12 @@ KWin.TabBoxSwitcher {
             id: highlightDurationResetTimer
             interval: thumbnailView ? thumbnailView.baseHighlightMoveDuration : 220
             repeat: false
-            onTriggered: if (thumbnailView) thumbnailView.highlightMoveDuration = thumbnailView.baseHighlightMoveDuration
+            onTriggered: {
+                if (thumbnailView) {
+                    thumbnailView.highlightMoveDuration = thumbnailView.baseHighlightMoveDuration
+                    thumbnailView.wrapInProgress = false
+                }
+            }
         }
     }
 

@@ -122,14 +122,32 @@ To smooth the visible rewind, each index transition now sets
 index:
 
 ```text
-duration = max(220 ms, distance * 160 ms)
+duration = max(220 ms, distance * 110 ms)
 ```
 
-Adjacent moves therefore stay at 220 ms. A wrap across `N` windows gets
-`(N - 1) * 160 ms`, then a timer restores the base 220 ms after the move.
-This keeps PathView's own movement model, avoiding a manual `offset`
-animation because offset wrapping is fragile with `pathItemCount`,
-`preferredHighlightBegin`, and explicit `movementDirection`.
+Adjacent moves therefore stay at 220 ms. A wrap across `N` windows now gets
+`(N - 1) * 110 ms`, then a timer restores the base 220 ms after the move.
+The previous `160 ms` multiplier made longer rewinds feel too slow, especially
+the common three-window `C -> A` path where the distance is 2.
+
+Multi-step wraps also enable a one-shot `Behavior on offset` while the
+rewind is in progress:
+
+```qml
+Behavior on offset {
+    enabled: thumbnailView.wrapInProgress
+    NumberAnimation {
+        duration: thumbnailView.highlightMoveDuration
+        easing.type: Easing.OutBack
+        easing.overshoot: 1.7
+    }
+}
+```
+
+This uses PathView's own movement model and only changes the interpolation
+curve during `distance > 1` wraps. The reset timer clears
+`wrapInProgress`, so normal adjacent Tab presses keep the base 220 ms
+movement without the arrival wobble.
 
 ## Compromises
 
