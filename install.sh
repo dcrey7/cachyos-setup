@@ -133,6 +133,9 @@ kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key theme    "__aur
 kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key ButtonsOnLeft  "M"
 kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key ButtonsOnRight "IAX"
 echo "    WhiteSur-dark; menu on left, min/max/close on right"
+kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Window Maximize" $'Meta+Up\tMeta+PgUp,Meta+PgUp,Maximize Window'
+kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Window Quick Tile Top" "none,Meta+Up,Quick Tile Window to the Top"
+echo "    KWin shortcut: Meta+Up maximizes instead of quick-tiling to top"
 
 # ---------------------------------------------------------------------------
 echo "==> 5/15  KWin effects (Magic Lamp + Wobbly/Glide/Sheet + Fade Desktop + Cube)"
