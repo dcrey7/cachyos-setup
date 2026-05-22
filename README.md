@@ -7,7 +7,7 @@ Post-install KDE Plasma 6 tweaks for CachyOS. The installer is idempotent and ca
 - WhiteSur-Dark window decoration with buttons kept on the right.
 - Darkly Qt application style, Darkly color scheme, and transparent Darkly widget opacity settings.
 - Breeze Dark Plasma desktop theme so `panelOpacity=translucent` actually makes panels see-through.
-- KWin effects: Magic Lamp, Wobbly Windows, Glide, Sheet, Fade Desktop, Cube, and tuned blur.
+- KWin effects: Magic Lamp, Wobbly Windows, Glide, Sheet, Fade Desktop, Cube, tuned blur, and a custom Cover Switch zoom-in activation effect.
 - Cover Switch and Flip Switch tabbox layouts rescued from the KDE MR !91 fork; Cover Switch refreshes the bottom panel reserve from KWin at Alt+Tab runtime, uses thumbnail zoom open/close transitions, and wraps through windows while forcing wrap animations to travel through the stack.
 - Panel layout tweaks, non-floating translucent panels, battery percentage, and clock layout.
 - Centered floating KRunner.

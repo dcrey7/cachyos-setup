@@ -284,3 +284,30 @@ card with Tab/arrow keys, then press Enter or Space while the switcher is still
 visible. The selected window thumbnail should expand toward full switcher size
 before the actual window is activated. Releasing Alt still uses KWin's
 immediate commit path and may snap.
+
+## Round 13 follow-up: compositor-owned close zoom
+
+Added a separate KWin JavaScript effect package at
+`assets/kwin-effects/coverswitch-zoom-in`. This is intentionally not part of
+the tabbox QML package: the QML layout owns the switcher surface and can keep
+the live thumbnail/card tracking illusion while the switcher is visible, but
+Plasma 6.6 closes that surface within about one frame of Alt release. The
+scripted effect listens to KWin's effect-side `tabBoxAdded`,
+`tabBoxUpdated`, and `tabBoxClosed` lifecycle signals and animates the real
+selected client after the tabbox surface is gone.
+
+The effect captures the active window at `tabBoxAdded`, tracks
+`effects.currentTabBoxWindow` during `tabBoxUpdated`, and skips the close
+animation if the selected window never changed. On close it estimates the
+center Cover Switch card as `45% x 45%` of the target window's output
+geometry, matching the current QML layout's `boxWidth` and `boxHeight`
+calibration. The compositor animation uses `Effect.Size`,
+`Effect.Translation`, and `Effect.Opacity` over 180 ms with
+`QEasingCurve.OutCubic`.
+
+`install.sh` now deploys the package to
+`~/.local/share/kwin/effects/coverswitch-zoom-in`, enables it with the
+`[Plugins] coverswitch-zoom-inEnabled=true` kwinrc key, calls KWin
+`reconfigure`, and asks the Effects D-Bus interface to load the effect. A
+logout/login is still the cleanest validation path for a newly installed user
+effect.

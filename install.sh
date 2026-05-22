@@ -18,7 +18,7 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-echo "==> 0/12  Sanity checks"
+echo "==> 0/13  Sanity checks"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ASSETS_DIR="$REPO_DIR/assets"
@@ -61,7 +61,7 @@ done
 echo "    All required tools present."
 
 # ---------------------------------------------------------------------------
-echo "==> 1/12  Backup current config"
+echo "==> 1/13  Backup current config"
 ts="$(date +%Y%m%d-%H%M%S)"
 backup_dir="$HOME/.config/cachyos-setup-backup-$ts"
 mkdir -p "$backup_dir"
@@ -75,7 +75,7 @@ ln -sfn "$backup_dir" "$HOME/.config/cachyos-setup-backup-latest"
 echo "    Latest backup symlinked at ~/.config/cachyos-setup-backup-latest"
 
 # ---------------------------------------------------------------------------
-echo "==> 2/12  WhiteSur-kde theme (AUR)"
+echo "==> 2/13  WhiteSur-kde theme (AUR)"
 if pacman -Qi whitesur-kde-theme >/dev/null 2>&1; then
   echo "    Already installed."
   echo "installed_by_us=0" > "$backup_dir/whitesur.state"
@@ -89,7 +89,7 @@ if [[ ! -d /usr/share/aurorae/themes/WhiteSur-dark && ! -d "$HOME/.local/share/a
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 3/12  Darkly application style + transparent widgets"
+echo "==> 3/13  Darkly application style + transparent widgets"
 if [[ -f /usr/lib/qt6/plugins/styles/darkly6.so && "$FORCE_DARKLY" -eq 0 ]]; then
   echo "    Darkly already installed. Use --force-darkly to rebuild."
 else
@@ -124,7 +124,7 @@ kwriteconfig6 --file darklyrc --group Style --key DolphinViewOpacity 100
 echo "    Darkly widget style applied; Breeze Dark desktop theme keeps panels translucent."
 
 # ---------------------------------------------------------------------------
-echo "==> 4/12  Window decoration + buttons-on-right"
+echo "==> 4/13  Window decoration + buttons-on-right"
 kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key library  "org.kde.kwin.aurorae"
 kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key theme    "__aurorae__svg__WhiteSur-dark"
 # Letters: M=menu, I=minimize, A=maximize, X=close. Left-to-right within each side.
@@ -133,7 +133,7 @@ kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key ButtonsOnRight 
 echo "    WhiteSur-dark; menu on left, min/max/close on right"
 
 # ---------------------------------------------------------------------------
-echo "==> 5/12  KWin effects (Magic Lamp + Wobbly/Glide/Sheet + Fade Desktop + Cube)"
+echo "==> 5/13  KWin effects (Magic Lamp + Wobbly/Glide/Sheet + Fade Desktop + Cube)"
 
 # Make sure kdeplasma-addons is installed (it provides the Cube effect on
 # Plasma 6 -- the classic one was removed and rewritten as a QML addon).
@@ -183,7 +183,7 @@ qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect blur >/dev/null 2>&
 echo "    Effects loaded: magiclamp(700ms), wobbly, glide, sheet, fadedesktop, cube, blur"
 
 # ---------------------------------------------------------------------------
-echo "==> 6/12  Cover Switch + Flip Switch tabbox layouts (rescued from KDE MR !91)"
+echo "==> 6/13  Cover Switch + Flip Switch tabbox layouts (rescued from KDE MR !91)"
 #
 # Honest context: the 3D Cover Switch / Flip Switch from KDE 4.x/5.x was REMOVED
 # in Plasma 6 and there is NO replacement in the official KDE Store, AUR, or
@@ -325,7 +325,28 @@ cat <<EOF
 EOF
 
 # ---------------------------------------------------------------------------
-echo "==> 7/12  Panel: non-floating + translucent + battery percentage"
+echo "==> 7/13  Cover Switch zoom-in close effect"
+
+EFFECT_SRC="$ASSETS_DIR/kwin-effects/coverswitch-zoom-in"
+EFFECT_DEST="$HOME/.local/share/kwin/effects/coverswitch-zoom-in"
+
+if [[ -d "$EFFECT_SRC" ]]; then
+  mkdir -p "$(dirname "$EFFECT_DEST")"
+  rm -rf "$EFFECT_DEST"
+  cp -r "$EFFECT_SRC" "$EFFECT_DEST"
+  echo "    Installed effect -> $EFFECT_DEST"
+
+  kwriteconfig6 --file kwinrc --group "Plugins" --key coverswitch-zoom-inEnabled --type bool true
+  echo "    Enabled coverswitch-zoom-in"
+
+  qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
+  qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect coverswitch-zoom-in >/dev/null 2>&1 || true
+else
+  echo "    SKIP  coverswitch-zoom-in: $EFFECT_SRC missing"
+fi
+
+# ---------------------------------------------------------------------------
+echo "==> 8/13  Panel: non-floating + translucent + battery percentage"
 # Find the systemtray containment and the battery child-applet ID dynamically,
 # so this works on any Plasma 6 layout (IDs differ per system).
 
@@ -448,7 +469,7 @@ kwriteconfig6 --file krunnerrc --group General --key Position Center
 echo "    KRunner: centered free-floating launcher"
 
 # ---------------------------------------------------------------------------
-echo "==> 8/12  Touchpad: enable natural scrolling"
+echo "==> 9/13  Touchpad: enable natural scrolling"
 # Per-device libinput config in ~/.config/kcminputrc. Enumerates touchpad-class
 # devices via /sys/class/input and writes NaturalScroll=true for each.
 touched_any=0
@@ -474,7 +495,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 9/12  Kickoff custom application-menu icon"
+echo "==> 10/13  Kickoff custom application-menu icon"
 kickoff_icon_assets="$ASSETS_DIR/icons"
 kickoff_icon_src="$kickoff_icon_assets/applicationMenu-nhsoft.svg"
 kickoff_icon_dir="$HOME/.local/share/icons/cachyos-setup"
@@ -530,7 +551,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 10/12  Konsole transparent profile"
+echo "==> 11/13  Konsole transparent profile"
 konsole_assets="$ASSETS_DIR/konsole"
 konsole_dir="$HOME/.local/share/konsole"
 if [[ -f "$konsole_assets/Transparent.profile" && -f "$konsole_assets/WhiteOnBlackTransparent.colorscheme" ]]; then
@@ -544,7 +565,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 11/12  VSCode native title bar (if installed)"
+echo "==> 12/13  VSCode native title bar (if installed)"
 vscode_settings="$HOME/.config/Code/User/settings.json"
 if [[ -d "$HOME/.config/Code" ]]; then
   mkdir -p "$(dirname "$vscode_settings")"
@@ -567,7 +588,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 12/12  Install zsh-setup"
+echo "==> 13/13  Install zsh-setup"
 zsh_setup_dir="$HOME/zsh-setup"
 if [[ ! -d "$zsh_setup_dir" ]]; then
   if git clone --depth=1 https://github.com/dcrey7/zsh-setup.git "$zsh_setup_dir"; then
