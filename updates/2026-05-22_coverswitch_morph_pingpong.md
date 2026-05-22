@@ -195,7 +195,7 @@ That was too low after the panel-visible workaround, because the card deck is
 intentionally above the window midpoint to leave room for the title strip and
 the 40-50 px bottom panel reserve.
 
-`rectForCenterCard()` now uses the actual card path center:
+`rectForCenterCard()` was first changed to use the card path center:
 
 ```qml
 var cardCenterY = thumbnailView.centerY ? thumbnailView.centerY : window.height / 2
@@ -203,14 +203,36 @@ var targetY = Math.round(cardCenterY - h / 2)
 ```
 
 `thumbnailView.centerY` is a live property in this layout
-(`readonly property real centerY: height * 0.48`), so no mapped delegate
-fallback was needed. X remains screen-centered to avoid pulling in side-card
+(`readonly property real centerY: height * 0.48`), and every PathLine in the
+deck uses that y value. User testing still showed the morph landing below the
+rendered cards, so the theoretical path y is not a reliable proxy for the
+delegate's visible center.
+
+## Round 12 follow-up: live delegate Y target
+
+`rectForCenterCard()` now keeps the existing per-window width and height
+calculation, but reads the current delegate's rendered center in the morph
+layer parent coordinate space:
+
+```qml
+var item = thumbnailView.currentItem
+var mapped = item.mapToItem(morphLayer.parent, item.width / 2, item.height / 2)
+var cardCenterY = (mapped && mapped.y > 0)
+                  ? mapped.y
+                  : (thumbnailView.centerY ? thumbnailView.centerY : window.height / 2)
+var targetY = Math.round(cardCenterY - h / 2)
+```
+
+This uses the actual post-PathView-placement delegate center when available.
+If the delegate is not ready, or maps to a non-positive y during early layout,
+the fallback remains the documented `thumbnailView.centerY`, then
+`window.height / 2`. X remains screen-centered to avoid pulling in side-card
 PathView offsets.
 
-Temporary confirmation logging was added:
+Temporary comparison logging was added:
 
 ```text
-coverswitch morph y: <targetY> vs cardCenterY: <cardCenterY>
+coverswitch y debug centerY=<thumbnailView.centerY> mappedY=<mapped.y> chosen=<cardCenterY>
 ```
 
 ## Round 11 follow-up: Alt-release close reinvestigation

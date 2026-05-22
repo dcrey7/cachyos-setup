@@ -130,9 +130,15 @@ KWin.TabBoxSwitcher {
             }
         }
 
-        var cardCenterY = thumbnailView.centerY ? thumbnailView.centerY : window.height / 2
+        var item = thumbnailView.currentItem
+        var mapped = item.mapToItem(morphLayer.parent, item.width / 2, item.height / 2)
+        var cardCenterY = (mapped && mapped.y > 0)
+                          ? mapped.y
+                          : (thumbnailView.centerY ? thumbnailView.centerY : window.height / 2)
         var targetY = Math.round(cardCenterY - h / 2)
-        console.log("coverswitch morph y: " + targetY + " vs cardCenterY: " + cardCenterY)
+        console.log("coverswitch y debug centerY=" + thumbnailView.centerY
+                    + " mappedY=" + (mapped ? mapped.y : "null")
+                    + " chosen=" + cardCenterY)
 
         return {
             x: Math.round((window.width - w) / 2),
