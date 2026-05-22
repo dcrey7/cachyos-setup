@@ -189,7 +189,7 @@ if [[ "$restored_kdeglobals" -eq 0 ]]; then
   # Restore stock CachyOS Look-and-Feel (Sweet-Mars on default install)
   # falling back to BreezeDark if Sweet-Mars isn't available.
   if have plasma-apply-lookandfeel; then
-    plasma-apply-lookandfeel -a Sweet-Mars >/dev/null 2>&1 \
+    plasma-apply-lookandfeel -a Sweet-Ambar-Blue >/dev/null 2>&1 \
       || plasma-apply-lookandfeel -a org.kde.breezedark.desktop >/dev/null 2>&1 \
       || warn "Could not apply Sweet-Mars or BreezeDark look-and-feel"
   fi
