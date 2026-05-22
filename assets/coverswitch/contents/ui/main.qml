@@ -20,14 +20,8 @@ KWin.TabBoxSwitcher {
     property bool correctingCurrentIndex: false
     property bool tabBoxApiDumped: false
 
-    readonly property int rawScreenWidth: Math.max(
-        Screen.width,
-        tabBox.screenGeometry.width,
-        Screen.desktopAvailableWidth)
-    readonly property int rawScreenHeight: Math.max(
-        Screen.height,
-        tabBox.screenGeometry.height,
-        Screen.desktopAvailableHeight)
+    readonly property int rawScreenWidth: Math.max(Screen.width, tabBox.screenGeometry.width)
+    readonly property int rawScreenHeight: Math.max(Screen.height, tabBox.screenGeometry.height)
 
     function restartFadeIn() {
         fadeInStarted = false
