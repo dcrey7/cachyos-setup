@@ -414,7 +414,7 @@ else
   echo "    No VSCode settings backup; leaving current settings"
 fi
 if [[ -f "$HOME/zsh-setup/uninstall.sh" ]]; then
-  (cd "$HOME/zsh-setup" && bash uninstall.sh) || warn "zsh-setup uninstall failed"
+  (cd "$HOME/zsh-setup" && bash uninstall.sh -y) || warn "zsh-setup uninstall failed"
 else
   echo "    ~/zsh-setup/uninstall.sh not found; skipping zsh cleanup"
 fi
