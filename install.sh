@@ -17,10 +17,10 @@
 #   - Optional zsh-setup integration
 #
 # Idempotent. Run again safely. Wayland-aware (Plasma 6 / KWin Wayland).
-set -euo pipefail
+set -uo pipefail
 
 # ---------------------------------------------------------------------------
-echo "==> 0/15  Sanity checks"
+echo "==> 0/16  Sanity checks + prerequisite bootstrap"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ASSETS_DIR="$REPO_DIR/assets"
@@ -54,16 +54,69 @@ if [[ "${plasma_ver%%.*}" -lt 6 ]]; then
   exit 1
 fi
 
+# --- Refresh pacman databases up front so every later `pacman -S` resolves.
+# On a fresh CachyOS live USB the DBs are not synced; without -Sy you get
+# "error: target not found: cmake" etc. when we try to install build deps.
+echo "    Refreshing pacman databases (sudo pacman -Sy)..."
+if ! sudo pacman -Sy --noconfirm >/dev/null 2>&1; then
+  echo "    WARNING: pacman -Sy failed; later package installs may fail too." >&2
+fi
+
+# --- Bootstrap required CLI tools that may be missing on a fresh CachyOS box.
+# Each tool maps to one pacman package. paru/python3/qdbus6 etc. are almost
+# always preinstalled on CachyOS KDE, but we don't assume it.
+declare -A TOOL_PKG=(
+  [kwriteconfig6]=kf6-kconfig
+  [kreadconfig6]=kf6-kconfig
+  [qdbus6]=qt6-tools
+  [python3]=python
+  [paru]=paru
+  [git]=git
+  [curl]=curl
+)
+missing_pkgs=()
+for cmd in "${!TOOL_PKG[@]}"; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    pkg="${TOOL_PKG[$cmd]}"
+    if ! pacman -Qi "$pkg" >/dev/null 2>&1; then
+      missing_pkgs+=("$pkg")
+    fi
+  fi
+done
+if (( ${#missing_pkgs[@]} > 0 )); then
+  echo "    Installing missing prerequisite packages: ${missing_pkgs[*]}"
+  if sudo pacman -S --needed --noconfirm "${missing_pkgs[@]}"; then
+    # Record which packages WE installed so uninstall.sh can roll them back
+    # without touching pre-existing system packages. Two stores: a pending
+    # per-run file (migrated into backup_dir in section 1) for legacy
+    # consumers, and the global ledger (initialized in section 1) for the
+    # cumulative cross-run truth.
+    mkdir -p "$HOME/.config" 2>/dev/null || true
+    bootstrap_state_dir="$HOME/.config/cachyos-setup-bootstrap-pending"
+    mkdir -p "$bootstrap_state_dir" 2>/dev/null || true
+    printf '%s\n' "${missing_pkgs[@]}" > "$bootstrap_state_dir/bootstrap-pkgs.state"
+    # Pending mark in a sidecar file consumed by section 1; mark_installed_by_us
+    # is only defined in section 1, so we cannot call it from here yet.
+    printf '%s\n' "${missing_pkgs[@]}" >> "$bootstrap_state_dir/global-pending.list"
+  else
+    echo "    WARNING: some prerequisite packages failed to install; continuing." >&2
+  fi
+fi
+
+# Final hard check: if anything is still missing, bail with a clear message.
 for cmd in kwriteconfig6 kreadconfig6 qdbus6 paru python3; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
-    echo "    ERROR: '$cmd' not found in PATH." >&2
+    echo "    ERROR: '$cmd' still not found after bootstrap. Install it manually and rerun." >&2
     exit 1
   fi
 done
 echo "    All required tools present."
 
+# Re-enable strict errors after the best-effort bootstrap section.
+set -e
+
 # ---------------------------------------------------------------------------
-echo "==> 1/15  Backup current config"
+echo "==> 1/16  Backup current config"
 ts="$(date +%Y%m%d-%H%M%S)"
 backup_dir="$HOME/.config/cachyos-setup-backup-$ts"
 mkdir -p "$backup_dir"
@@ -76,8 +129,63 @@ done
 ln -sfn "$backup_dir" "$HOME/.config/cachyos-setup-backup-latest"
 echo "    Latest backup symlinked at ~/.config/cachyos-setup-backup-latest"
 
+# Migrate any pending bootstrap state (recorded in section 0 before backup_dir
+# existed) so uninstall.sh sees it under the backup directory.
+bootstrap_state_dir="$HOME/.config/cachyos-setup-bootstrap-pending"
+if [[ -f "$bootstrap_state_dir/bootstrap-pkgs.state" ]]; then
+  mv "$bootstrap_state_dir/bootstrap-pkgs.state" "$backup_dir/bootstrap-pkgs.state"
+  rmdir "$bootstrap_state_dir" 2>/dev/null || true
+  echo "    Recorded bootstrap-pkgs.state from prerequisite install"
+fi
+
+# Global "installed by us" ledger. Cumulative across install runs so a second
+# install that finds a package already present (because a prior run installed
+# it) still leaves uninstall.sh authoritative info to remove it later.
+GLOBAL_PKG_STATE="$HOME/.local/share/cachyos-setup/installed-by-us.list"
+mkdir -p "$(dirname "$GLOBAL_PKG_STATE")"
+touch "$GLOBAL_PKG_STATE"
+mark_installed_by_us() {
+  local pkg="$1"
+  grep -qxF "$pkg" "$GLOBAL_PKG_STATE" || echo "$pkg" >> "$GLOBAL_PKG_STATE"
+}
+# Seed the ledger from any pre-existing per-backup state files left by earlier
+# runs (where the package was marked installed_by_us=1). Idempotent: if a
+# package is already in the ledger, mark_installed_by_us is a no-op.
+shopt -s nullglob
+for prev_state in "$HOME"/.config/cachyos-setup-backup-*/whitesur.state; do
+  if grep -q '^installed_by_us=1' "$prev_state" 2>/dev/null; then
+    mark_installed_by_us whitesur-kde-theme
+  fi
+done
+for prev_state in "$HOME"/.config/cachyos-setup-backup-*/kdeplasma-addons.state; do
+  if grep -q '^installed_by_us=1' "$prev_state" 2>/dev/null; then
+    mark_installed_by_us kdeplasma-addons
+  fi
+done
+for prev_state in "$HOME"/.config/cachyos-setup-backup-*/win11-icon.state; do
+  if grep -q '^installed_by_us=1' "$prev_state" 2>/dev/null; then
+    mark_installed_by_us win11-icon-theme-git
+  fi
+done
+for prev_state in "$HOME"/.config/cachyos-setup-backup-*/darkly-build-deps.state \
+                  "$HOME"/.config/cachyos-setup-backup-*/bootstrap-pkgs.state; do
+  while IFS= read -r prev_pkg; do
+    [[ -n "$prev_pkg" ]] && mark_installed_by_us "$prev_pkg"
+  done < "$prev_state" 2>/dev/null
+done
+shopt -u nullglob
+
+# Drain any pending bootstrap-pkg marks (recorded in section 0 before this
+# helper existed).
+if [[ -f "$bootstrap_state_dir/global-pending.list" ]]; then
+  while IFS= read -r pkg; do
+    [[ -n "$pkg" ]] && mark_installed_by_us "$pkg"
+  done < "$bootstrap_state_dir/global-pending.list"
+  rm -f "$bootstrap_state_dir/global-pending.list"
+fi
+
 # ---------------------------------------------------------------------------
-echo "==> 2/15  WhiteSur-kde theme (AUR)"
+echo "==> 2/16  WhiteSur-kde theme (AUR)"
 if pacman -Qi whitesur-kde-theme >/dev/null 2>&1; then
   echo "    Already installed."
   echo "installed_by_us=0" > "$backup_dir/whitesur.state"
@@ -85,28 +193,55 @@ else
   echo "    Installing via paru..."
   paru -S --needed --noconfirm whitesur-kde-theme
   echo "installed_by_us=1" > "$backup_dir/whitesur.state"
+  mark_installed_by_us whitesur-kde-theme
 fi
 if [[ ! -d /usr/share/aurorae/themes/WhiteSur-dark && ! -d "$HOME/.local/share/aurorae/themes/WhiteSur-dark" ]]; then
   echo "    WARNING: WhiteSur-dark aurorae theme directory not found." >&2
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 3/15  Darkly application style + transparent widgets"
+echo "==> 3/16  Darkly application style + transparent widgets"
 if [[ -f /usr/lib/qt6/plugins/styles/darkly6.so && "$FORCE_DARKLY" -eq 0 ]]; then
   echo "    Darkly already installed. Use --force-darkly to rebuild."
 else
-  echo "    Installing Darkly build dependencies..."
-  sudo pacman -S --needed --noconfirm \
-    cmake extra-cmake-modules kdecoration qt6-declarative kcoreaddons kcmutils \
-    kcolorscheme kconfig kguiaddons kiconthemes kwindowsystem gcc make
+  # Gate each build-dep on pacman -Qi so we only install what's actually missing.
+  # On a fresh CachyOS box most of these aren't there; on a returning box they
+  # already are. Either way, we pacman -Sy first to make sure DBs are fresh.
+  darkly_build_deps=(cmake extra-cmake-modules kdecoration qt6-declarative
+    kcoreaddons kcmutils kcolorscheme kconfig kguiaddons kiconthemes
+    kwindowsystem gcc make)
+  missing_build_deps=()
+  for pkg in "${darkly_build_deps[@]}"; do
+    pacman -Qi "$pkg" >/dev/null 2>&1 || missing_build_deps+=("$pkg")
+  done
+  if (( ${#missing_build_deps[@]} > 0 )); then
+    echo "    Installing Darkly build dependencies: ${missing_build_deps[*]}"
+    sudo pacman -Sy --noconfirm >/dev/null 2>&1 || true
+    if sudo pacman -S --needed --noconfirm "${missing_build_deps[@]}"; then
+      # Record only the packages we actually installed so uninstall.sh can
+      # remove them without touching pre-existing system packages.
+      printf '%s\n' "${missing_build_deps[@]}" > "$backup_dir/darkly-build-deps.state"
+      for pkg in "${missing_build_deps[@]}"; do
+        mark_installed_by_us "$pkg"
+      done
+    else
+      echo "    WARNING: Some Darkly build deps failed to install; build may fail." >&2
+    fi
+  else
+    echo "    Darkly build deps already installed."
+  fi
 
   darkly_build_dir="/tmp/Darkly-build"
   rm -rf "$darkly_build_dir"
   if git clone --depth=1 https://github.com/Bali10050/Darkly.git "$darkly_build_dir"; then
-    if (cd "$darkly_build_dir" && ./install.sh qt6); then
-      echo "    Darkly installed."
+    # Upstream install.sh returns non-zero even on a successful "Installation
+    # completed!" run, so we re-check the on-disk artifact instead of trusting
+    # the exit code. If darkly6.so landed in qt6 plugins, treat it as success.
+    (cd "$darkly_build_dir" && ./install.sh qt6) || true
+    if [[ -f /usr/lib/qt6/plugins/styles/darkly6.so ]]; then
+      echo "    Darkly installed (darkly6.so in /usr/lib/qt6/plugins/styles)."
     else
-      echo "    WARNING: Darkly installer failed; continuing without aborting." >&2
+      echo "    WARNING: Darkly installer ran but darkly6.so is missing; continuing." >&2
     fi
   else
     echo "    WARNING: Darkly clone failed; continuing without aborting." >&2
@@ -126,7 +261,7 @@ kwriteconfig6 --file darklyrc --group Style --key DolphinViewOpacity 100
 echo "    Darkly widget style applied; Breeze Dark desktop theme keeps panels translucent."
 
 # ---------------------------------------------------------------------------
-echo "==> 4/15  Window decoration + buttons-on-right"
+echo "==> 4/16  Window decoration + buttons-on-right"
 kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key library  "org.kde.kwin.aurorae"
 kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" --key theme    "__aurorae__svg__WhiteSur-dark"
 # Letters: M=menu, I=minimize, A=maximize, X=close. Left-to-right within each side.
@@ -138,7 +273,7 @@ kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Window Quick Tile To
 echo "    KWin shortcut: Meta+Up maximizes instead of quick-tiling to top"
 
 # ---------------------------------------------------------------------------
-echo "==> 5/15  KWin effects (Magic Lamp + Wobbly/Glide/Sheet + Fade Desktop + Cube)"
+echo "==> 5/16  KWin effects (Magic Lamp + Wobbly/Glide/Sheet + Fade Desktop + Cube)"
 
 # Make sure kdeplasma-addons is installed (it provides the Cube effect on
 # Plasma 6 -- the classic one was removed and rewritten as a QML addon).
@@ -149,6 +284,7 @@ else
   echo "    Installing kdeplasma-addons (brings the Cube effect)..."
   sudo pacman -S --needed --noconfirm kdeplasma-addons
   echo "installed_by_us=1" > "$backup_dir/kdeplasma-addons.state"
+  mark_installed_by_us kdeplasma-addons
 fi
 
 # Minimize: Plasma 6 default is "squash". Swap to Magic Lamp.
@@ -188,7 +324,7 @@ qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect blur >/dev/null 2>&
 echo "    Effects loaded: magiclamp(700ms), wobbly, glide, sheet, fadedesktop, cube, blur"
 
 # ---------------------------------------------------------------------------
-echo "==> 6/15  Cover Switch + Flip Switch tabbox layouts (rescued from KDE MR !91)"
+echo "==> 6/16  Cover Switch + Flip Switch tabbox layouts (rescued from KDE MR !91)"
 #
 # Honest context: the 3D Cover Switch / Flip Switch from KDE 4.x/5.x was REMOVED
 # in Plasma 6 and there is NO replacement in the official KDE Store, AUR, or
@@ -330,7 +466,7 @@ cat <<EOF
 EOF
 
 # ---------------------------------------------------------------------------
-echo "==> 7/15  Cover Switch zoom-in close effect"
+echo "==> 7/16  Cover Switch zoom-in close effect"
 
 EFFECT_SRC="$ASSETS_DIR/kwin-effects/coverswitch-zoom-in"
 EFFECT_DEST="$HOME/.local/share/kwin/effects/coverswitch-zoom-in"
@@ -352,7 +488,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 8/15  Custom workspace indicator plasmoid"
+echo "==> 8/16  Custom workspace indicator plasmoid"
 PLASMOID_SRC="$ASSETS_DIR/plasmoids/cachyos-workspace-indicator"
 PLASMOID_DEST="$HOME/.local/share/plasma/plasmoids/cachyos.workspace-indicator"
 if [[ -d "$PLASMOID_SRC" ]]; then
@@ -365,7 +501,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 9/15  Panel: non-floating + translucent + circular workspace indicator + centered taskbar + battery percentage"
+echo "==> 9/16  Panel: non-floating + translucent + circular workspace indicator + centered taskbar + battery percentage"
 # Find the systemtray containment and the battery child-applet ID dynamically,
 # so this works on any Plasma 6 layout (IDs differ per system).
 
@@ -447,14 +583,25 @@ else
   echo "    WARNING: No battery applet found (desktop without battery?). Skipping."
 fi
 
-# Digital clock: time and date side by side instead of stacked
+# Digital clock: time and date side by side, with a custom date format.
+# Date format renders as "May | Fri | 22/05/2026 |" (MMM | ddd | dd/MM/yyyy |).
 if [[ -n "$CLOCK_AID" ]]; then
   kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
     --group "Containments" --group "$CLOCK_CID" \
     --group "Applets" --group "$CLOCK_AID" \
     --group "Configuration" --group "Appearance" \
     --key dateDisplayFormat "BesideTime"
-  echo "    Clock: date beside time (not stacked)"
+  kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+    --group "Containments" --group "$CLOCK_CID" \
+    --group "Applets" --group "$CLOCK_AID" \
+    --group "Configuration" --group "Appearance" \
+    --key dateFormat "custom"
+  kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+    --group "Containments" --group "$CLOCK_CID" \
+    --group "Applets" --group "$CLOCK_AID" \
+    --group "Configuration" --group "Appearance" \
+    --key customDateFormat "MMM | ddd | dd/MM/yyyy |"
+  echo "    Clock: date beside time, custom format 'MMM | ddd | dd/MM/yyyy |'"
 fi
 
 if [[ "${#PANEL_IDS[@]}" -gt 0 ]]; then
@@ -504,9 +651,14 @@ PY
     kwriteconfig6 --file plasmashellrc \
       --group "PlasmaViews" --group "Panel $panel_id" \
       --key floating --type bool false
+    # Panel height: 40px (default is 44). Stored under PlasmaViews/Panel N/Defaults.
+    kwriteconfig6 --file plasmashellrc \
+      --group "PlasmaViews" --group "Panel $panel_id" --group "Defaults" \
+      --key thickness 40
   done
   echo "    Panel opacity: translucent for containment IDs ${PANEL_IDS[*]}"
   echo "    Panel floating: false for containment IDs ${PANEL_IDS[*]}"
+  echo "    Panel thickness: 40px for containment IDs ${PANEL_IDS[*]}"
 
   next_panel_applet_id="$(python3 - "$appletsrc" <<'PY'
 import re
@@ -773,7 +925,7 @@ kwriteconfig6 --file krunnerrc --group General --key Position Center
 echo "    KRunner: centered free-floating launcher"
 
 # ---------------------------------------------------------------------------
-echo "==> 10/15  Keyboard shortcuts: Meta opens KRunner"
+echo "==> 10/16  Keyboard shortcuts: Meta opens KRunner"
 launcher_shortcut_key="activate application launcher"
 launcher_shortcut_current="$(kreadconfig6 --file kglobalshortcutsrc \
   --group "plasmashell" \
@@ -805,7 +957,7 @@ nohup kstart plasmashell >/dev/null 2>&1 & disown
 sleep 3
 
 # ---------------------------------------------------------------------------
-echo "==> 11/15  Touchpad: enable natural scrolling"
+echo "==> 11/16  Touchpad: enable natural scrolling"
 # Per-device libinput config in ~/.config/kcminputrc. Enumerates touchpad-class
 # devices via /sys/class/input and writes NaturalScroll=true for each.
 touched_any=0
@@ -831,7 +983,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 12/15  Kickoff custom application-menu icon"
+echo "==> 12/16  Kickoff custom application-menu icon"
 kickoff_icon_assets="$ASSETS_DIR/icons"
 kickoff_icon_src="$kickoff_icon_assets/applicationMenu-nhsoft.svg"
 kickoff_icon_dir="$HOME/.local/share/icons/cachyos-setup"
@@ -887,7 +1039,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 13/15  Konsole transparent profile"
+echo "==> 13/16  Konsole transparent profile"
 konsole_assets="$ASSETS_DIR/konsole"
 konsole_dir="$HOME/.local/share/konsole"
 if [[ -f "$konsole_assets/Transparent.profile" && -f "$konsole_assets/WhiteOnBlackTransparent.colorscheme" ]]; then
@@ -901,7 +1053,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 14/15  VSCode native title bar (if installed)"
+echo "==> 14/16  VSCode native title bar (if installed)"
 vscode_settings="$HOME/.config/Code/User/settings.json"
 if [[ -d "$HOME/.config/Code" ]]; then
   mkdir -p "$(dirname "$vscode_settings")"
@@ -924,7 +1076,44 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 15/15  Install zsh-setup"
+echo "==> 15/16  Win11 icon theme (yeyushengfan258, AUR)"
+# Icon theme from https://github.com/yeyushengfan258/Win11-icon-theme, packaged
+# in AUR as `win11-icon-theme-git`. Installed via paru. After install the theme
+# is at /usr/share/icons/Win11 -- we set it as the global Plasma icon theme.
+if pacman -Qi win11-icon-theme-git >/dev/null 2>&1; then
+  echo "    win11-icon-theme-git already installed."
+  echo "installed_by_us=0" > "$backup_dir/win11-icon.state"
+else
+  echo "    Installing win11-icon-theme-git via paru..."
+  if paru -S --needed --noconfirm win11-icon-theme-git; then
+    echo "installed_by_us=1" > "$backup_dir/win11-icon.state"
+    mark_installed_by_us win11-icon-theme-git
+  else
+    echo "    WARNING: win11-icon-theme-git install failed; continuing without aborting." >&2
+    echo "installed_by_us=0" > "$backup_dir/win11-icon.state"
+  fi
+fi
+# Pick whichever Win11* theme variant is actually present on disk (the AUR
+# package historically ships a few; we prefer plain "Win11" but fall back).
+win11_icon_name=""
+for cand in Win11 Win11-dark Win11-black Win11-light; do
+  if [[ -d "/usr/share/icons/$cand" || -d "$HOME/.local/share/icons/$cand" ]]; then
+    win11_icon_name="$cand"
+    break
+  fi
+done
+if [[ -n "$win11_icon_name" ]]; then
+  kwriteconfig6 --file kdeglobals --group Icons --key Theme "$win11_icon_name"
+  if command -v plasma-changeicons >/dev/null 2>&1; then
+    plasma-changeicons "$win11_icon_name" >/dev/null 2>&1 || true
+  fi
+  echo "    Icon theme set to $win11_icon_name"
+else
+  echo "    WARNING: No Win11* icon theme directory found; icon theme not changed." >&2
+fi
+
+# ---------------------------------------------------------------------------
+echo "==> 16/16  Install zsh-setup"
 zsh_setup_dir="$HOME/zsh-setup"
 if [[ ! -d "$zsh_setup_dir" ]]; then
   if git clone --depth=1 https://github.com/dcrey7/zsh-setup.git "$zsh_setup_dir"; then
@@ -940,6 +1129,18 @@ if [[ -f "$zsh_setup_dir/install.sh" ]]; then
 else
   echo "    WARNING: $zsh_setup_dir/install.sh not found; skipping zsh-setup install." >&2
 fi
+
+# ---------------------------------------------------------------------------
+# Final plasmashell restart: picks up changes written after section 10's
+# restart -- in particular the Kickoff custom application-menu icon (section
+# 12), Konsole defaults (13), and Win11 icon theme (15). Without this, the
+# kickoff button keeps showing the old icon until the next logout/login.
+echo "Restarting plasmashell once more so post-section-10 writes take effect..."
+kquitapp6 plasmashell 2>/dev/null || true
+sleep 1
+pkill -9 plasmashell 2>/dev/null || true
+nohup kstart plasmashell >/dev/null 2>&1 & disown
+sleep 2
 
 # ---------------------------------------------------------------------------
 echo ""
