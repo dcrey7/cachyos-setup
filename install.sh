@@ -54,13 +54,85 @@ if [[ "${plasma_ver%%.*}" -lt 6 ]]; then
   exit 1
 fi
 
+pacman_has_sync_dbs() {
+  local dbs=()
+  shopt -s nullglob
+  dbs=(/var/lib/pacman/sync/*.db)
+  shopt -u nullglob
+  (( ${#dbs[@]} > 0 ))
+}
+
+refresh_pacman_databases() {
+  local log_file
+  log_file="$(mktemp)"
+
+  pacman_sync_ok() {
+    : > "$log_file"
+    sudo pacman -Syy --noconfirm >"$log_file" 2>&1 && pacman_has_sync_dbs
+  }
+
+  echo "    Refreshing pacman databases (sudo pacman -Syy)..."
+  if pacman_sync_ok; then
+    rm -f "$log_file"
+    return 0
+  fi
+
+  echo "    pacman database refresh failed. Output follows:" >&2
+  sed 's/^/      /' "$log_file" >&2
+
+  if command -v timedatectl >/dev/null 2>&1; then
+    echo "    Enabling network time sync, then retrying pacman..."
+    sudo timedatectl set-ntp true >/dev/null 2>&1 || true
+    if pacman_sync_ok; then
+      rm -f "$log_file"
+      return 0
+    fi
+  fi
+
+  if command -v cachyos-rate-mirrors >/dev/null 2>&1; then
+    echo "    Trying to refresh CachyOS mirrors, then syncing pacman again..."
+    if sudo cachyos-rate-mirrors; then
+      if pacman_sync_ok; then
+        rm -f "$log_file"
+        return 0
+      fi
+      echo "    pacman database refresh still failed. Output follows:" >&2
+      sed 's/^/      /' "$log_file" >&2
+    else
+      echo "    WARNING: cachyos-rate-mirrors failed." >&2
+    fi
+  fi
+
+  if grep -Eiq 'signature|keyring|unknown trust|invalid or corrupted|PGP|GPG|key' "$log_file"; then
+    echo "    Trying to repair pacman keyrings, then syncing pacman again..."
+    sudo pacman-key --init >/dev/null 2>&1 || true
+    sudo pacman-key --populate archlinux cachyos >/dev/null 2>&1 || true
+    if pacman_sync_ok; then
+      rm -f "$log_file"
+      return 0
+    fi
+    echo "    pacman database refresh still failed after keyring repair. Output follows:" >&2
+    sed 's/^/      /' "$log_file" >&2
+  fi
+
+  rm -f "$log_file"
+  cat >&2 <<'EOF'
+    ERROR: pacman has no synced repository databases, so official packages
+    cannot be resolved. This is why installs fail with messages like:
+      error: target not found: cmake
+
+    The installer already tried: pacman -Syy, network time sync, CachyOS
+    mirror refresh, and keyring repair when pacman reported signature/key
+    trouble. At this point the live session likely has no working network,
+    broken mirrors, a pacman lock, or another pacman error shown above.
+EOF
+  exit 1
+}
+
 # --- Refresh pacman databases up front so every later `pacman -S` resolves.
-# On a fresh CachyOS live USB the DBs are not synced; without -Sy you get
+# On a fresh CachyOS live USB the DBs are not synced; without -Syy you get
 # "error: target not found: cmake" etc. when we try to install build deps.
-echo "    Refreshing pacman databases (sudo pacman -Sy)..."
-if ! sudo pacman -Sy --noconfirm >/dev/null 2>&1; then
-  echo "    WARNING: pacman -Sy failed; later package installs may fail too." >&2
-fi
+refresh_pacman_databases
 
 # --- Bootstrap required CLI tools that may be missing on a fresh CachyOS box.
 # Each tool maps to one pacman package. paru/python3/qdbus6 etc. are almost
@@ -206,7 +278,8 @@ if [[ -f /usr/lib/qt6/plugins/styles/darkly6.so && "$FORCE_DARKLY" -eq 0 ]]; the
 else
   # Gate each build-dep on pacman -Qi so we only install what's actually missing.
   # On a fresh CachyOS box most of these aren't there; on a returning box they
-  # already are. Either way, we pacman -Sy first to make sure DBs are fresh.
+  # already are. Either way, we force-refresh pacman DBs first to make sure
+  # repo metadata is present before resolving package names.
   darkly_build_deps=(cmake extra-cmake-modules kdecoration qt6-declarative
     kcoreaddons kcmutils kcolorscheme kconfig kguiaddons kiconthemes
     kwindowsystem gcc make)
@@ -216,7 +289,7 @@ else
   done
   if (( ${#missing_build_deps[@]} > 0 )); then
     echo "    Installing Darkly build dependencies: ${missing_build_deps[*]}"
-    sudo pacman -Sy --noconfirm >/dev/null 2>&1 || true
+    refresh_pacman_databases
     if sudo pacman -S --needed --noconfirm "${missing_build_deps[@]}"; then
       # Record only the packages we actually installed so uninstall.sh can
       # remove them without touching pre-existing system packages.

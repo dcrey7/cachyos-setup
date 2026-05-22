@@ -23,9 +23,12 @@ Post-install KDE Plasma 6 tweaks for CachyOS. The installer is idempotent and ca
 
 On a fresh CachyOS install, `pacman` databases are unsynced and most of the
 Darkly build dependencies (`cmake`, `extra-cmake-modules`, `gcc`, `make`, …)
-are absent. Section `0/16` of `install.sh` syncs the DBs (`sudo pacman -Sy`)
-and installs every missing prerequisite before any later section runs, so
-you do not need to pre-install anything yourself.
+are absent. Section `0/16` of `install.sh` force-syncs the DBs
+(`sudo pacman -Syy`), enables network time sync, refreshes CachyOS mirrors,
+and repairs pacman keyrings when pacman reports signature/key trouble. After
+pacman can resolve official repo packages, the installer installs every
+missing prerequisite before any later section runs, so you do not need to
+pre-install anything yourself.
 
 ## Run
 
