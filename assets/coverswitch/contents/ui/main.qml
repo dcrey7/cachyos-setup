@@ -18,6 +18,9 @@ KWin.TabBoxSwitcher {
     property bool fadeInStarted: false
     property int panelReserve: __PANEL_RESERVE__
     property bool correctingCurrentIndex: false
+    property bool closeMorphPending: false
+    property bool centerRectDebugVisible: false
+    property var centerRectDebugRect: ({ x: 0, y: 0, width: 0, height: 0 })
 
     readonly property int rawScreenWidth: Math.max(
         Screen.width,
@@ -83,22 +86,59 @@ KWin.TabBoxSwitcher {
             return null
         }
 
-        var item = thumbnailView.currentItem
-        if (!item || item.width <= 0 || item.height <= 0) {
+        var w = thumbnailView.boxWidth
+        var h = thumbnailView.boxHeight
+        if (w <= 0 || h <= 0) {
             return null
         }
 
-        var pathScale = (item.PathView && item.PathView.scale) ? item.PathView.scale : 1.0
-        var effectiveScale = item.scale && item.scale > 0 ? item.scale : pathScale
-        effectiveScale = Math.max(effectiveScale, pathScale)
-        var w = Math.round(item.width * effectiveScale)
-        var h = Math.round(item.height * effectiveScale)
         return {
             x: Math.round((window.width - w) / 2),
             y: Math.round((window.height - h) / 2),
-            width: Math.max(1, w),
-            height: Math.max(1, h)
+            width: w,
+            height: h
         }
+    }
+
+    function logCenterCardRect(reason) {
+        var rect = rectForCenterCard()
+        if (!rect) {
+            console.log("coverswitch center-card-rect", reason, "unavailable",
+                        "window", window.width + "x" + window.height)
+            return
+        }
+
+        console.log("coverswitch center-card-rect", reason,
+                    "x", rect.x, "y", rect.y,
+                    "width", rect.width, "height", rect.height,
+                    "boxWidth", thumbnailView.boxWidth,
+                    "boxHeight", thumbnailView.boxHeight,
+                    "window", window.width + "x" + window.height)
+    }
+
+    function showCenterRectDebug(reason) {
+        var rect = rectForCenterCard()
+        logCenterCardRect(reason)
+        if (!rect) {
+            return
+        }
+        centerRectDebugRect = rect
+        centerRectDebugVisible = true
+        centerRectDebugTimer.restart()
+    }
+
+    function dumpTabBoxApi() {
+        console.log("coverswitch tabBox API enumeration begin")
+        for (var k in tabBox) {
+            try {
+                console.log("coverswitch tabBox." + k + " = " + tabBox[k])
+            } catch (e) {
+                console.log("coverswitch tabBox." + k + " = <error " + e + ">")
+            }
+        }
+        console.log("coverswitch tabBox API enumeration end")
+        console.log("coverswitch tabBox model.activate type",
+                    tabBox.model && tabBox.model.activate ? typeof tabBox.model.activate : "unavailable")
     }
 
     function setMorphFull(duration, animate) {
@@ -185,6 +225,32 @@ KWin.TabBoxSwitcher {
             setMorphFull(180, true)
             morphLayer.opacity = 0
         })
+    }
+
+    function commitCurrentSelection() {
+        if (!thumbnailView || thumbnailView.count <= 0 || !tabBox.model || !tabBox.model.activate) {
+            closeMorphPending = false
+            return
+        }
+
+        var idx = clampIndex(thumbnailView.currentIndex)
+        if (idx >= 0) {
+            closeMorphPending = false
+            tabBox.model.activate(idx)
+        }
+    }
+
+    function confirmSelection(event) {
+        if (event) {
+            event.accepted = true
+        }
+        if (closeMorphPending) {
+            return
+        }
+
+        closeMorphPending = true
+        startCloseMorph()
+        closeMorphCompleteTimer.restart()
     }
 
     function wrappedIndex(idx) {
@@ -287,8 +353,10 @@ KWin.TabBoxSwitcher {
 
         Component.onCompleted: {
             tabBox.refreshPanelReserve()
+            tabBox.dumpTabBoxApi()
             if (tabBox.visible) {
                 tabBox.restartFadeIn()
+                Qt.callLater(function() { tabBox.showCenterRectDebug("Component.onCompleted") })
                 Qt.callLater(function() { tabBox.startOpenMorph() })
             }
         }
@@ -446,6 +514,8 @@ KWin.TabBoxSwitcher {
                     } else if (event.key === Qt.Key_Backtab || event.key === Qt.Key_Left || event.key === Qt.Key_Up) {
                         tabBox.stepCurrentIndex(-1)
                         event.accepted = true
+                    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
+                        tabBox.confirmSelection(event)
                     }
                 }
             }
@@ -480,6 +550,19 @@ KWin.TabBoxSwitcher {
                 text: i18ndc("kwin", "@info:placeholder no entries in the task switcher", "No open windows")
                 visible: thumbnailView.count === 0
             }
+        }
+
+        Rectangle {
+            id: centerRectDebugOutline
+            x: tabBox.centerRectDebugRect.x
+            y: tabBox.centerRectDebugRect.y
+            width: tabBox.centerRectDebugRect.width
+            height: tabBox.centerRectDebugRect.height
+            visible: tabBox.centerRectDebugVisible && tabBox.visible
+            color: "transparent"
+            border.color: "red"
+            border.width: 2
+            z: 49
         }
 
         Item {
@@ -539,6 +622,20 @@ KWin.TabBoxSwitcher {
         }
 
         Timer {
+            id: centerRectDebugTimer
+            interval: 1400
+            repeat: false
+            onTriggered: tabBox.centerRectDebugVisible = false
+        }
+
+        Timer {
+            id: closeMorphCompleteTimer
+            interval: 180
+            repeat: false
+            onTriggered: tabBox.commitCurrentSelection()
+        }
+
+        Timer {
             id: highlightDurationResetTimer
             interval: thumbnailView ? thumbnailView.baseHighlightMoveDuration : 220
             repeat: false
@@ -574,9 +671,16 @@ KWin.TabBoxSwitcher {
             refreshPanelReserve()
             window.visible = true
             restartFadeIn()
+            closeMorphPending = false
+            Qt.callLater(function() { tabBox.showCenterRectDebug("onVisibleChanged") })
             Qt.callLater(function() { tabBox.startOpenMorph() })
         } else {
-            startCloseMorph()
+            morphHideTimer.stop()
+            closeMorphCompleteTimer.stop()
+            centerRectDebugTimer.stop()
+            morphLayer.active = false
+            closeMorphPending = false
+            centerRectDebugVisible = false
             fadeInStarted = false
             Qt.callLater(function() {
                 correctingCurrentIndex = true
