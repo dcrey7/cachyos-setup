@@ -445,3 +445,31 @@ The translation is now a direct offset from the target window's actual
 top-left: `fromTransX = cardX - rect.x` and `fromTransY = cardY - rect.y`.
 That makes the visual start at the center card rectangle before growing into
 the real window geometry.
+
+## Round 17 follow-up: post-tabbox window activation
+
+Journal evidence showed the Round 16 assumption was wrong on this Plasma 6.6
+session: at `tabBoxClosed`, `effects.activeWindow` still points at the window
+that was active when the switcher opened. The log showed `start == end` even
+after selecting a different window, so the activation has not propagated yet
+when `tabBoxClosed` runs.
+
+`coverswitch-zoom-in` now treats `tabBoxClosed` as an arming point instead of
+the animation trigger. It records `effects.activeWindow` at `tabBoxAdded`, sets
+`expectingActivation = true` at `tabBoxClosed`, and runs the zoom from
+`onWindowActivated(window)` only if that activation arrives after the switcher
+closed and differs from the recorded start window. A 400 ms `Qt.setTimeout`
+expiration clears the armed state if no activation follows, limiting stray
+later activations.
+
+Runtime validation after redeploying and reloading the KWin effect showed:
+
+```text
+coverswitch-zoom-in EFFECT init called
+coverswitch-zoom-in effects.windowActivated type=function
+coverswitch-zoom-in EFFECT signals connected OK
+```
+
+The fallback candidates `effects.windowActivatedChanged`,
+`effects.activeWindowChanged`, and `effects.activated` were all `undefined` in
+this runtime, so the effect connects directly to `effects.windowActivated`.

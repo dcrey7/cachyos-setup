@@ -10,6 +10,8 @@ var coverSwitchZoomInEffect = {
     sessionActive: false,
     animationActive: false,
     sessionStartWindow: null,
+    expectingActivation: false,
+    expirationTimer: null,
 
     loadConfig: function () {
         coverSwitchZoomInEffect.duration = animationTime(180);
@@ -103,13 +105,14 @@ var coverSwitchZoomInEffect = {
         console.log("coverswitch-zoom-in tabBoxAdded mode=" + mode);
         coverSwitchZoomInEffect.sessionActive = true;
         coverSwitchZoomInEffect.sessionStartWindow = effects.activeWindow;
+        coverSwitchZoomInEffect.expectingActivation = false;
+        coverSwitchZoomInEffect.cancelExpiration();
         console.log("coverswitch-zoom-in sessionStartWindow="
             + (effects.activeWindow ? effects.activeWindow.caption : "null"));
     },
 
     onTabBoxUpdated: function () {
-        // No-op: we don't track per-step selection anymore.
-        // The new active window will be picked up on tabBoxClosed.
+        // No-op: window activation is caught after tabBoxClosed.
         console.log("coverswitch-zoom-in tabBoxUpdated (no-op)");
     },
 
@@ -123,25 +126,58 @@ var coverSwitchZoomInEffect = {
             return;
         }
         coverSwitchZoomInEffect.sessionActive = false;
+        coverSwitchZoomInEffect.expectingActivation = true;
 
-        var startWindow = coverSwitchZoomInEffect.sessionStartWindow;
-        var endWindow = effects.activeWindow;
+        console.log("coverswitch-zoom-in tabBoxClosed (arming windowActivated catch)");
+        coverSwitchZoomInEffect.scheduleExpiration(400);
+    },
+
+    onWindowActivated: function (window) {
+        if (!coverSwitchZoomInEffect.expectingActivation) {
+            return;
+        }
+        coverSwitchZoomInEffect.expectingActivation = false;
+        coverSwitchZoomInEffect.cancelExpiration();
+
+        console.log("coverswitch-zoom-in windowActivated post-tabbox window="
+            + (window ? window.caption : "null")
+            + " start="
+            + (coverSwitchZoomInEffect.sessionStartWindow
+                ? coverSwitchZoomInEffect.sessionStartWindow.caption
+                : "null"));
+
+        if (!window) {
+            coverSwitchZoomInEffect.sessionStartWindow = null;
+            return;
+        }
+        if (window === coverSwitchZoomInEffect.sessionStartWindow) {
+            console.log("coverswitch-zoom-in skip: activated same as start (user dismissed)");
+            coverSwitchZoomInEffect.sessionStartWindow = null;
+            return;
+        }
+
         coverSwitchZoomInEffect.sessionStartWindow = null;
+        coverSwitchZoomInEffect.runZoomIn(window);
+    },
 
-        console.log("coverswitch-zoom-in tabBoxClosed start="
-            + (startWindow ? startWindow.caption : "null")
-            + " end=" + (endWindow ? endWindow.caption : "null"));
+    scheduleExpiration: function (ms) {
+        coverSwitchZoomInEffect.cancelExpiration();
+        coverSwitchZoomInEffect.expirationTimer = Qt.setTimeout(function () {
+            if (coverSwitchZoomInEffect.expectingActivation) {
+                console.log("coverswitch-zoom-in expiration: no windowActivated within "
+                    + ms + "ms");
+            }
+            coverSwitchZoomInEffect.expectingActivation = false;
+            coverSwitchZoomInEffect.expirationTimer = null;
+        }, ms);
+    },
 
-        if (!endWindow) {
-            console.log("coverswitch-zoom-in skip: no end window");
-            return;
+    cancelExpiration: function () {
+        if (coverSwitchZoomInEffect.expirationTimer) {
+            // KWin's QJSEngine has no clearTimeout equivalent. The pending
+            // closure expires naturally; expectingActivation is the gate.
+            coverSwitchZoomInEffect.expirationTimer = null;
         }
-        if (endWindow === startWindow) {
-            console.log("coverswitch-zoom-in skip: selection unchanged (user dismissed)");
-            return;
-        }
-
-        coverSwitchZoomInEffect.runZoomIn(endWindow);
     },
 
     runZoomIn: function (window) {
@@ -217,6 +253,8 @@ var coverSwitchZoomInEffect = {
 
     resetSession: function () {
         coverSwitchZoomInEffect.sessionActive = false;
+        coverSwitchZoomInEffect.expectingActivation = false;
+        coverSwitchZoomInEffect.cancelExpiration();
         coverSwitchZoomInEffect.sessionStartWindow = null;
     },
 
@@ -237,6 +275,10 @@ var coverSwitchZoomInEffect = {
         console.log("coverswitch-zoom-in effects.tabBoxAdded type=" + typeof effects.tabBoxAdded);
         console.log("coverswitch-zoom-in effects.tabBoxClosed type=" + typeof effects.tabBoxClosed);
         console.log("coverswitch-zoom-in effects.tabBoxUpdated type=" + typeof effects.tabBoxUpdated);
+        console.log("coverswitch-zoom-in effects.windowActivated type=" + typeof effects.windowActivated);
+        console.log("coverswitch-zoom-in effects.windowActivatedChanged type=" + typeof effects.windowActivatedChanged);
+        console.log("coverswitch-zoom-in effects.activeWindowChanged type=" + typeof effects.activeWindowChanged);
+        console.log("coverswitch-zoom-in effects.activated type=" + typeof effects.activated);
         console.log("coverswitch-zoom-in effects keys: " + coverSwitchZoomInEffect.describeKeys(effects));
         try {
             console.log("coverswitch-zoom-in Effect keys: " + coverSwitchZoomInEffect.describeKeys(Effect));
@@ -249,6 +291,15 @@ var coverSwitchZoomInEffect = {
             effects.tabBoxAdded.connect(coverSwitchZoomInEffect.onTabBoxAdded);
             effects.tabBoxClosed.connect(coverSwitchZoomInEffect.onTabBoxClosed);
             effects.tabBoxUpdated.connect(coverSwitchZoomInEffect.onTabBoxUpdated);
+            if (typeof effects.windowActivated !== "undefined") {
+                effects.windowActivated.connect(coverSwitchZoomInEffect.onWindowActivated);
+            } else if (typeof effects.windowActivatedChanged !== "undefined") {
+                effects.windowActivatedChanged.connect(coverSwitchZoomInEffect.onWindowActivated);
+            } else if (typeof effects.activeWindowChanged !== "undefined") {
+                effects.activeWindowChanged.connect(coverSwitchZoomInEffect.onWindowActivated);
+            } else if (typeof effects.activated !== "undefined") {
+                effects.activated.connect(coverSwitchZoomInEffect.onWindowActivated);
+            }
             console.log("coverswitch-zoom-in EFFECT signals connected OK");
         } catch (e) {
             console.log("coverswitch-zoom-in EFFECT signal connect FAILED: " + e);
