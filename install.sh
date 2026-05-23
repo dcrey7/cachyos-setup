@@ -239,6 +239,11 @@ for prev_state in "$HOME"/.config/cachyos-setup-backup-*/win11-icon.state; do
     mark_installed_by_us win11-icon-theme-git
   fi
 done
+for prev_state in "$HOME"/.config/cachyos-setup-backup-*/reversal-icon.state; do
+  if grep -q '^installed_by_us=1' "$prev_state" 2>/dev/null; then
+    mark_installed_by_us reversal-icon-theme-git
+  fi
+done
 for prev_state in "$HOME"/.config/cachyos-setup-backup-*/darkly-build-deps.state \
                   "$HOME"/.config/cachyos-setup-backup-*/bootstrap-pkgs.state; do
   while IFS= read -r prev_pkg; do
@@ -1120,7 +1125,7 @@ if [[ -f "$konsole_assets/Transparent.profile" && -f "$konsole_assets/WhiteOnBla
   cp "$konsole_assets/Transparent.profile" "$konsole_dir/Transparent.profile"
   cp "$konsole_assets/WhiteOnBlackTransparent.colorscheme" "$konsole_dir/WhiteOnBlackTransparent.colorscheme"
   kwriteconfig6 --file konsolerc --group "Desktop Entry" --key DefaultProfile Transparent.profile
-  echo "    Konsole: Transparent.profile installed and set as default"
+  echo "    Konsole: Transparent.profile installed and set as default (7% transparent)"
 else
   echo "    WARNING: Konsole template files missing under $konsole_assets; skipping." >&2
 fi
@@ -1149,40 +1154,39 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 15/16  Win11 icon theme (yeyushengfan258, AUR)"
-# Icon theme from https://github.com/yeyushengfan258/Win11-icon-theme, packaged
-# in AUR as `win11-icon-theme-git`. Installed via paru. After install the theme
-# is at /usr/share/icons/Win11 -- we set it as the global Plasma icon theme.
-if pacman -Qi win11-icon-theme-git >/dev/null 2>&1; then
-  echo "    win11-icon-theme-git already installed."
-  echo "installed_by_us=0" > "$backup_dir/win11-icon.state"
+echo "==> 15/16  Reversal icon theme (yeyushengfan258, AUR)"
+# Icon theme from https://github.com/yeyushengfan258/Reversal-icon-theme,
+# packaged in AUR as `reversal-icon-theme-git`. Prefer Reversal-dark for this
+# dark Plasma setup, falling back to Reversal if only the light variant exists.
+if pacman -Qi reversal-icon-theme-git >/dev/null 2>&1; then
+  echo "    reversal-icon-theme-git already installed."
+  echo "installed_by_us=0" > "$backup_dir/reversal-icon.state"
 else
-  echo "    Installing win11-icon-theme-git via paru..."
-  if paru -S --needed --noconfirm win11-icon-theme-git; then
-    echo "installed_by_us=1" > "$backup_dir/win11-icon.state"
-    mark_installed_by_us win11-icon-theme-git
+  echo "    Installing reversal-icon-theme-git via paru..."
+  if paru -S --needed --noconfirm reversal-icon-theme-git; then
+    echo "installed_by_us=1" > "$backup_dir/reversal-icon.state"
+    mark_installed_by_us reversal-icon-theme-git
   else
-    echo "    WARNING: win11-icon-theme-git install failed; continuing without aborting." >&2
-    echo "installed_by_us=0" > "$backup_dir/win11-icon.state"
+    echo "    WARNING: reversal-icon-theme-git install failed; continuing without aborting." >&2
+    echo "installed_by_us=0" > "$backup_dir/reversal-icon.state"
   fi
 fi
-# Pick whichever Win11* theme variant is actually present on disk (the AUR
-# package historically ships a few; we prefer plain "Win11" but fall back).
-win11_icon_name=""
-for cand in Win11 Win11-dark Win11-black Win11-light; do
+# Pick whichever Reversal theme variant is actually present on disk.
+reversal_icon_name=""
+for cand in Reversal-dark Reversal; do
   if [[ -d "/usr/share/icons/$cand" || -d "$HOME/.local/share/icons/$cand" ]]; then
-    win11_icon_name="$cand"
+    reversal_icon_name="$cand"
     break
   fi
 done
-if [[ -n "$win11_icon_name" ]]; then
-  kwriteconfig6 --file kdeglobals --group Icons --key Theme "$win11_icon_name"
+if [[ -n "$reversal_icon_name" ]]; then
+  kwriteconfig6 --file kdeglobals --group Icons --key Theme "$reversal_icon_name"
   if command -v plasma-changeicons >/dev/null 2>&1; then
-    plasma-changeicons "$win11_icon_name" >/dev/null 2>&1 || true
+    plasma-changeicons "$reversal_icon_name" >/dev/null 2>&1 || true
   fi
-  echo "    Icon theme set to $win11_icon_name"
+  echo "    Icon theme set to $reversal_icon_name"
 else
-  echo "    WARNING: No Win11* icon theme directory found; icon theme not changed." >&2
+  echo "    WARNING: No Reversal icon theme directory found; icon theme not changed." >&2
 fi
 
 # ---------------------------------------------------------------------------
@@ -1206,7 +1210,7 @@ fi
 # ---------------------------------------------------------------------------
 # Final plasmashell restart: picks up changes written after section 10's
 # restart -- in particular the Kickoff custom application-menu icon (section
-# 12), Konsole defaults (13), and Win11 icon theme (15). Without this, the
+# 12), Konsole defaults (13), and Reversal icon theme (15). Without this, the
 # kickoff button keeps showing the old icon until the next logout/login.
 echo "Restarting plasmashell once more so post-section-10 writes take effect..."
 kquitapp6 plasmashell 2>/dev/null || true

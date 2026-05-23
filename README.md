@@ -12,10 +12,10 @@ Post-install KDE Plasma 6 tweaks for CachyOS. The installer is idempotent and ca
 - Panel layout tweaks, a custom circular numbered workspace indicator next to Kickoff, centered taskbar with spacers, non-floating translucent panels, battery percentage, and clock layout.
 - Centered floating KRunner, with the Meta key bound to open centered search instead of Kickoff.
 - Custom Kickoff application-menu icon (SVG) from `assets/icons/`, plus 40px panel height with spacers around the centered taskbar.
-- Win11 icon theme by yeyushengfan258 (`win11-icon-theme-git` AUR), set as the global Plasma icon theme.
+- Reversal icon theme by yeyushengfan258 (`reversal-icon-theme-git` AUR), set as the global Plasma icon theme with `Reversal-dark` preferred.
 - Digital clock with custom date format `MMM | ddd | dd/MM/yyyy |` rendered beside the time.
 - Custom Plasma 6 workspace-indicator plasmoid from `assets/plasmoids/`.
-- Transparent Konsole profile and colorscheme from `assets/konsole/`.
+- Transparent Konsole profile and colorscheme from `assets/konsole/` with 7% transparency.
 - VSCode native title bar settings when VSCode is present.
 - Optional `zsh-setup` integration from `https://github.com/dcrey7/zsh-setup`.
 
@@ -48,7 +48,7 @@ The script creates timestamped backups under `~/.config/cachyos-setup-backup-*` 
 
 By default `uninstall.sh` is now a full clean wipe: it removes every package
 `install.sh` pulled in (Darkly build deps, `whitesur-kde-theme`,
-`win11-icon-theme-git`, `kdeplasma-addons` if it installed them), deletes the
+`reversal-icon-theme-git`, `kdeplasma-addons` if it installed them), deletes the
 system Darkly Qt6 style plugin, and removes `~/zsh-setup`. Pass
 `--keep-packages`, `--keep-darkly-binary`, or `--keep-zsh-repo` for a softer
 uninstall that leaves those in place.

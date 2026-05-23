@@ -56,8 +56,8 @@ AUR packages it installed, the system Darkly Qt6 style plugin, and the
 Options:
   -y, --yes                Do not prompt for confirmation.
   --keep-packages          Keep AUR/repo packages that install.sh installed
-                           (whitesur-kde-theme, win11-icon-theme-git,
-                           kdeplasma-addons).
+                           (whitesur-kde-theme, reversal-icon-theme-git,
+                           legacy win11-icon-theme-git, kdeplasma-addons).
   --keep-darkly-binary     Keep /usr/lib/qt6/plugins/styles/darkly6.so.
   --keep-zsh-repo          Keep ~/zsh-setup on disk after its uninstall.
   --remove-packages        (deprecated, default behavior) Remove packages.
@@ -100,6 +100,9 @@ if [[ ! -f "$GLOBAL_PKG_STATE" ]]; then
     fi
     if [[ -f "$d/win11-icon.state" ]] && grep -q '^installed_by_us=1' "$d/win11-icon.state"; then
       grep -qxF win11-icon-theme-git "$GLOBAL_PKG_STATE" || echo win11-icon-theme-git >> "$GLOBAL_PKG_STATE"
+    fi
+    if [[ -f "$d/reversal-icon.state" ]] && grep -q '^installed_by_us=1' "$d/reversal-icon.state"; then
+      grep -qxF reversal-icon-theme-git "$GLOBAL_PKG_STATE" || echo reversal-icon-theme-git >> "$GLOBAL_PKG_STATE"
     fi
     for f in "$d/darkly-build-deps.state" "$d/bootstrap-pkgs.state"; do
       [[ -f "$f" ]] || continue
@@ -254,7 +257,7 @@ if [[ "$restored_kdeglobals" -eq 0 ]]; then
       || warn "Could not apply BreezeDark or Sweet-Ambar-Blue look-and-feel"
   fi
 
-  # Reset icon theme away from Win11 / WhiteSur to a sane default.
+  # Reset icon theme away from custom AUR themes to a sane default.
   write_key --file kdeglobals --group Icons --key Theme breeze-dark
 
   # Reset wallpaper to CachyOS default (cachyos.svg) via plasmashell scripting.
@@ -622,14 +625,15 @@ if [[ "$REMOVE_ZSH_REPO" -eq 1 && -d "$HOME/zsh-setup" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-echo "==> 15/16  Win11 icon theme revert"
-# install.sh sets Icons.Theme=Win11* via kdeglobals; if we restored kdeglobals
-# from backup this is already undone. Otherwise force the icon theme back to
-# the CachyOS default (breeze-dark) and clear any stale Win11 references in
-# user-mode kdeglobals.
+echo "==> 15/16  Reversal icon theme revert"
+# install.sh sets Icons.Theme=Reversal* via kdeglobals; if we restored
+# kdeglobals from backup this is already undone. Otherwise force the icon theme
+# back to the CachyOS default (breeze-dark) and clear any stale custom icon
+# references in user-mode kdeglobals. Keep Win11 here as a legacy cleanup path
+# for machines installed before the Reversal switch.
 if [[ "$restored_kdeglobals" -eq 0 ]]; then
   current_icons="$(kreadconfig6 --file kdeglobals --group Icons --key Theme 2>/dev/null || true)"
-  if [[ "$current_icons" == Win11* ]]; then
+  if [[ "$current_icons" == Reversal* || "$current_icons" == Win11* ]]; then
     write_key --file kdeglobals --group Icons --key Theme breeze-dark
     if command -v plasma-changeicons >/dev/null 2>&1; then
       plasma-changeicons breeze-dark >/dev/null 2>&1 || true
@@ -637,6 +641,23 @@ if [[ "$restored_kdeglobals" -eq 0 ]]; then
     echo "    Icons.Theme: $current_icons -> breeze-dark"
   fi
 fi
+reversal_marked=0
+if grep -qxF reversal-icon-theme-git "$GLOBAL_PKG_STATE" 2>/dev/null; then
+  reversal_marked=1
+elif [[ -n "$backup_dir" && -f "$backup_dir/reversal-icon.state" ]] \
+  && grep -q '^installed_by_us=1' "$backup_dir/reversal-icon.state"; then
+  reversal_marked=1
+fi
+if [[ "$REMOVE_PACKAGES" -eq 1 && "$reversal_marked" -eq 1 ]]; then
+  if have paru && pacman -Qi reversal-icon-theme-git >/dev/null 2>&1; then
+    run paru -Rns --noconfirm reversal-icon-theme-git
+  else
+    echo "    reversal-icon-theme-git not installed or paru unavailable"
+  fi
+else
+  echo "    Leaving reversal-icon-theme-git package in place (not marked installed by us)"
+fi
+
 win11_marked=0
 if grep -qxF win11-icon-theme-git "$GLOBAL_PKG_STATE" 2>/dev/null; then
   win11_marked=1
@@ -651,16 +672,16 @@ if [[ "$REMOVE_PACKAGES" -eq 1 && "$win11_marked" -eq 1 ]]; then
     echo "    win11-icon-theme-git not installed or paru unavailable"
   fi
 else
-  echo "    Leaving win11-icon-theme-git package in place (not marked installed by us)"
+  echo "    Leaving legacy win11-icon-theme-git package in place (not marked installed by us)"
 fi
 
 # ---------------------------------------------------------------------------
 echo "==> 16/16  Ledger-driven package cleanup + final Plasma/KWin reload"
 # Pull the cumulative ledger of "everything install.sh ever installed for us"
-# and remove whatever is still on the system. WhiteSur and Win11 icon theme
-# packages have already been handled in their own sections; we skip them here
+# and remove whatever is still on the system. WhiteSur and icon theme packages
+# have already been handled in their own sections; we skip them here
 # so we don't double-call pacman.
-already_handled=(whitesur-kde-theme win11-icon-theme-git)
+already_handled=(whitesur-kde-theme reversal-icon-theme-git win11-icon-theme-git)
 if [[ "$REMOVE_PACKAGES" -eq 1 && -f "$GLOBAL_PKG_STATE" ]]; then
   remaining_to_remove=()
   while IFS= read -r pkg; do
