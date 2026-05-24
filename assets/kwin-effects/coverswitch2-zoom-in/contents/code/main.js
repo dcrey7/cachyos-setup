@@ -6,6 +6,7 @@
 "use strict";
 
 var coverSwitchZoomInEffect = {
+    debug: false,
     duration: animationTime(180),
     sessionActive: false,
     animationActive: false,
@@ -13,9 +14,15 @@ var coverSwitchZoomInEffect = {
     expectingActivation: false,
     expirationDeadline: 0,
 
+    log: function (message) {
+        if (coverSwitchZoomInEffect.debug) {
+            console.log(message);
+        }
+    },
+
     loadConfig: function () {
         coverSwitchZoomInEffect.duration = animationTime(180);
-        console.log("coverswitch-zoom-in loadConfig duration=" + coverSwitchZoomInEffect.duration);
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in loadConfig duration=" + coverSwitchZoomInEffect.duration);
     },
 
     windowGeometry: function (window) {
@@ -102,23 +109,23 @@ var coverSwitchZoomInEffect = {
     },
 
     onTabBoxAdded: function (mode) {
-        console.log("coverswitch-zoom-in tabBoxAdded mode=" + mode);
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in tabBoxAdded mode=" + mode);
         coverSwitchZoomInEffect.sessionActive = true;
         coverSwitchZoomInEffect.sessionStartWindow = effects.activeWindow;
         coverSwitchZoomInEffect.expectingActivation = false;
         coverSwitchZoomInEffect.expirationDeadline = 0;
-        console.log("coverswitch-zoom-in sessionStartWindow="
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in sessionStartWindow="
             + (effects.activeWindow ? effects.activeWindow.caption : "null"));
     },
 
     onTabBoxUpdated: function () {
         // No-op: window activation is caught after tabBoxClosed.
-        console.log("coverswitch-zoom-in tabBoxUpdated (no-op)");
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in tabBoxUpdated (no-op)");
     },
 
     onTabBoxClosed: function () {
         if (!coverSwitchZoomInEffect.sessionActive) {
-            console.log("coverswitch-zoom-in tabBoxClosed: no active session, skipping");
+            coverSwitchZoomInEffect.log("coverswitch2-zoom-in tabBoxClosed: no active session, skipping");
             return;
         }
         if (coverSwitchZoomInEffect.animationActive) {
@@ -129,7 +136,7 @@ var coverSwitchZoomInEffect = {
         coverSwitchZoomInEffect.expectingActivation = true;
         coverSwitchZoomInEffect.expirationDeadline = Date.now() + 400;
 
-        console.log("coverswitch-zoom-in tabBoxClosed (arming windowActivated catch)");
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in tabBoxClosed (arming windowActivated catch)");
     },
 
     onWindowActivated: function (window) {
@@ -137,7 +144,7 @@ var coverSwitchZoomInEffect = {
             return;
         }
         if (Date.now() > coverSwitchZoomInEffect.expirationDeadline) {
-            console.log("coverswitch-zoom-in expiration: no windowActivated within 400ms");
+            coverSwitchZoomInEffect.log("coverswitch2-zoom-in expiration: no windowActivated within 400ms");
             coverSwitchZoomInEffect.expectingActivation = false;
             coverSwitchZoomInEffect.expirationDeadline = 0;
             coverSwitchZoomInEffect.sessionStartWindow = null;
@@ -146,7 +153,7 @@ var coverSwitchZoomInEffect = {
         coverSwitchZoomInEffect.expectingActivation = false;
         coverSwitchZoomInEffect.expirationDeadline = 0;
 
-        console.log("coverswitch-zoom-in windowActivated post-tabbox window="
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in windowActivated post-tabbox window="
             + (window ? window.caption : "null")
             + " start="
             + (coverSwitchZoomInEffect.sessionStartWindow
@@ -158,7 +165,7 @@ var coverSwitchZoomInEffect = {
             return;
         }
         if (window === coverSwitchZoomInEffect.sessionStartWindow) {
-            console.log("coverswitch-zoom-in skip: activated same as start (user dismissed)");
+            coverSwitchZoomInEffect.log("coverswitch2-zoom-in skip: activated same as start (user dismissed)");
             coverSwitchZoomInEffect.sessionStartWindow = null;
             return;
         }
@@ -172,7 +179,7 @@ var coverSwitchZoomInEffect = {
 
         var rect = coverSwitchZoomInEffect.windowGeometry(window);
         if (!rect || rect.width <= 0 || rect.height <= 0) {
-            console.log("coverswitch-zoom-in runZoomIn skip: invalid rect "
+            coverSwitchZoomInEffect.log("coverswitch2-zoom-in runZoomIn skip: invalid rect "
                 + (rect ? rect.width + "x" + rect.height : "null"));
             return;
         }
@@ -189,7 +196,7 @@ var coverSwitchZoomInEffect = {
         var fromTransX = cardX - rect.x;
         var fromTransY = cardY - rect.y;
 
-        console.log("coverswitch-zoom-in runZoomIn window=" + window.caption
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in runZoomIn window=" + window.caption
             + " rect=" + JSON.stringify(rect)
             + " card=" + cardX + "," + cardY + " " + cardW + "x" + cardH
             + " fromTrans=" + fromTransX + "," + fromTransY);
@@ -230,11 +237,11 @@ var coverSwitchZoomInEffect = {
                     }
                 ]
             });
-            console.log("coverswitch-zoom-in animate returned id=" + animId);
-            window.coverswitchZoomInAnimation = animId;
+            coverSwitchZoomInEffect.log("coverswitch2-zoom-in animate returned id=" + animId);
+            window.coverswitch2ZoomInAnimation = animId;
             coverSwitchZoomInEffect.animationActive = true;
         } catch (e) {
-            console.log("coverswitch-zoom-in animate FAILED: " + e);
+            coverSwitchZoomInEffect.log("coverswitch2-zoom-in animate FAILED: " + e);
         }
     },
 
@@ -246,31 +253,31 @@ var coverSwitchZoomInEffect = {
     },
 
     onAnimationEnded: function (window) {
-        console.log("coverswitch-zoom-in animationEnded window=" +
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in animationEnded window=" +
             coverSwitchZoomInEffect.describeWindow(window));
-        if (!window || !window.coverswitchZoomInAnimation) {
+        if (!window || !window.coverswitch2ZoomInAnimation) {
             return;
         }
 
-        delete window.coverswitchZoomInAnimation;
+        delete window.coverswitch2ZoomInAnimation;
         coverSwitchZoomInEffect.animationActive = false;
         window.setData(Effect.WindowForceBlurRole, null);
     },
 
     init: function () {
-        console.log("coverswitch-zoom-in EFFECT init called");
-        console.log("coverswitch-zoom-in effects.tabBoxAdded type=" + typeof effects.tabBoxAdded);
-        console.log("coverswitch-zoom-in effects.tabBoxClosed type=" + typeof effects.tabBoxClosed);
-        console.log("coverswitch-zoom-in effects.tabBoxUpdated type=" + typeof effects.tabBoxUpdated);
-        console.log("coverswitch-zoom-in effects.windowActivated type=" + typeof effects.windowActivated);
-        console.log("coverswitch-zoom-in effects.windowActivatedChanged type=" + typeof effects.windowActivatedChanged);
-        console.log("coverswitch-zoom-in effects.activeWindowChanged type=" + typeof effects.activeWindowChanged);
-        console.log("coverswitch-zoom-in effects.activated type=" + typeof effects.activated);
-        console.log("coverswitch-zoom-in effects keys: " + coverSwitchZoomInEffect.describeKeys(effects));
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in EFFECT init called");
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in effects.tabBoxAdded type=" + typeof effects.tabBoxAdded);
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in effects.tabBoxClosed type=" + typeof effects.tabBoxClosed);
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in effects.tabBoxUpdated type=" + typeof effects.tabBoxUpdated);
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in effects.windowActivated type=" + typeof effects.windowActivated);
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in effects.windowActivatedChanged type=" + typeof effects.windowActivatedChanged);
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in effects.activeWindowChanged type=" + typeof effects.activeWindowChanged);
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in effects.activated type=" + typeof effects.activated);
+        coverSwitchZoomInEffect.log("coverswitch2-zoom-in effects keys: " + coverSwitchZoomInEffect.describeKeys(effects));
         try {
-            console.log("coverswitch-zoom-in Effect keys: " + coverSwitchZoomInEffect.describeKeys(Effect));
+            coverSwitchZoomInEffect.log("coverswitch2-zoom-in Effect keys: " + coverSwitchZoomInEffect.describeKeys(Effect));
         } catch (e) {
-            console.log("coverswitch-zoom-in Effect keys FAILED: " + e);
+            coverSwitchZoomInEffect.log("coverswitch2-zoom-in Effect keys FAILED: " + e);
         }
         try {
             effect.configChanged.connect(coverSwitchZoomInEffect.loadConfig);
@@ -287,9 +294,9 @@ var coverSwitchZoomInEffect = {
             } else if (typeof effects.activated !== "undefined") {
                 effects.activated.connect(coverSwitchZoomInEffect.onWindowActivated);
             }
-            console.log("coverswitch-zoom-in EFFECT signals connected OK");
+            coverSwitchZoomInEffect.log("coverswitch2-zoom-in EFFECT signals connected OK");
         } catch (e) {
-            console.log("coverswitch-zoom-in EFFECT signal connect FAILED: " + e);
+            coverSwitchZoomInEffect.log("coverswitch2-zoom-in EFFECT signal connect FAILED: " + e);
         }
         coverSwitchZoomInEffect.loadConfig();
     }

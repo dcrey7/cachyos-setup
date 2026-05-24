@@ -16,12 +16,20 @@ KWin.TabBoxSwitcher {
     id: tabBox
     currentIndex: thumbnailView ? thumbnailView.currentIndex : -1
     property bool fadeInStarted: false
-    property int panelReserve: __PANEL_RESERVE__
+    readonly property int fallbackPanelReserve: 44
+    readonly property bool debugLogging: false
+    property int panelReserve: fallbackPanelReserve
     property bool correctingCurrentIndex: false
     property bool tabBoxApiDumped: false
 
     readonly property int rawScreenWidth: Math.max(Screen.width, tabBox.screenGeometry.width)
     readonly property int rawScreenHeight: Math.max(Screen.height, tabBox.screenGeometry.height)
+
+    function debugLog() {
+        if (debugLogging) {
+            console.log.apply(console, arguments)
+        }
+    }
 
     function restartFadeIn() {
         fadeInStarted = false
@@ -129,7 +137,7 @@ KWin.TabBoxSwitcher {
                           ? mapped.y
                           : (thumbnailView.centerY ? thumbnailView.centerY : window.height / 2)
         var targetY = Math.round(cardCenterY - h / 2)
-        console.log("coverswitch y debug centerY=" + thumbnailView.centerY
+        debugLog("coverswitch2 y debug centerY=" + thumbnailView.centerY
                     + " mappedY=" + (mapped ? mapped.y : "null")
                     + " chosen=" + cardCenterY)
 
@@ -144,12 +152,12 @@ KWin.TabBoxSwitcher {
     function logCenterCardRect(reason) {
         var rect = rectForCenterCard()
         if (!rect) {
-            console.log("coverswitch center-card-rect", reason, "unavailable",
+            debugLog("coverswitch2 center-card-rect", reason, "unavailable",
                         "window", window.width + "x" + window.height)
             return
         }
 
-        console.log("coverswitch center-card-rect", reason,
+        debugLog("coverswitch2 center-card-rect", reason,
                     "x", rect.x, "y", rect.y,
                     "width", rect.width, "height", rect.height,
                     "boxWidth", thumbnailView.boxWidth,
@@ -163,50 +171,50 @@ KWin.TabBoxSwitcher {
         }
         tabBoxApiDumped = true
 
-        console.log("coverswitch tabBox API enumeration begin t=" + Date.now())
+        debugLog("coverswitch2 tabBox API enumeration begin t=" + Date.now())
         for (var k in tabBox) {
             try {
                 if (typeof tabBox[k] === "function") {
-                    console.log("coverswitch.fn  tabBox." + k)
+                    debugLog("coverswitch2.fn  tabBox." + k)
                 } else {
-                    console.log("coverswitch tabBox." + k + " = " + tabBox[k])
+                    debugLog("coverswitch2 tabBox." + k + " = " + tabBox[k])
                 }
             } catch (e) {
-                console.log("coverswitch tabBox." + k + " = <error " + e + ">")
+                debugLog("coverswitch2 tabBox." + k + " = <error " + e + ">")
             }
         }
         for (var sig of ["activate", "accept", "select", "commit", "close", "hide"]) {
             try {
                 if (tabBox[sig + "ed"]) {
-                    console.log("coverswitch.sig " + sig + "ed exists")
+                    debugLog("coverswitch2.sig " + sig + "ed exists")
                 }
             } catch (e) {
             }
         }
-        console.log("coverswitch tabBox API enumeration end t=" + Date.now())
-        console.log("coverswitch tabBox model.activate type",
+        debugLog("coverswitch2 tabBox API enumeration end t=" + Date.now())
+        debugLog("coverswitch2 tabBox model.activate type",
                     tabBox.model && tabBox.model.activate ? typeof tabBox.model.activate : "unavailable")
     }
 
     function dumpModelApi() {
-        console.log("coverswitch model type: " + tabBox.model + " t=" + Date.now())
+        debugLog("coverswitch2 model type: " + tabBox.model + " t=" + Date.now())
         if (!tabBox.model) {
             return
         }
 
-        console.log("coverswitch model API enumeration begin t=" + Date.now())
+        debugLog("coverswitch2 model API enumeration begin t=" + Date.now())
         for (var k in tabBox.model) {
             try {
                 if (typeof tabBox.model[k] === "function") {
-                    console.log("coverswitch.fn  model." + k)
+                    debugLog("coverswitch2.fn  model." + k)
                 } else {
-                    console.log("coverswitch model." + k + " = " + tabBox.model[k])
+                    debugLog("coverswitch2 model." + k + " = " + tabBox.model[k])
                 }
             } catch (e) {
-                console.log("coverswitch model." + k + " = <error " + e + ">")
+                debugLog("coverswitch2 model." + k + " = <error " + e + ">")
             }
         }
-        console.log("coverswitch model API enumeration end t=" + Date.now())
+        debugLog("coverswitch2 model API enumeration end t=" + Date.now())
     }
 
     function setMorphFull(duration, animate) {
@@ -373,7 +381,7 @@ KWin.TabBoxSwitcher {
                 panelReserve = Math.round(bottomReserve)
             }
         } catch (e) {
-            panelReserve = __PANEL_RESERVE__
+            panelReserve = fallbackPanelReserve
         }
     }
 
@@ -425,7 +433,7 @@ KWin.TabBoxSwitcher {
             }
 
             Component.onCompleted: {
-                console.log("coverswitch DesktopBackground activity=" + KWin.Workspace.currentActivity
+                debugLog("coverswitch2 DesktopBackground activity=" + KWin.Workspace.currentActivity
                             + " desktop=" + KWin.Workspace.currentDesktop
                             + " screenAt result=" + KWin.Workspace.screenAt(Qt.point(
                                 tabBox.screenGeometry.x + tabBox.screenGeometry.width / 2,
@@ -669,12 +677,12 @@ KWin.TabBoxSwitcher {
                 easing.type: Easing.OutCubic
                 onStopped: {
                     if (morphLayer.opacity === 0) {
-                        console.log("coverswitch morph fade animation stopped, opacity="
+                        debugLog("coverswitch2 morph fade animation stopped, opacity="
                                     + morphLayer.opacity + " setting active=false")
                         morphLayer.opacity = 0
                         morphLayer.active = false
                         morphLayer.windowId = undefined
-                        console.log("coverswitch morph FULLY cleaned up")
+                        debugLog("coverswitch2 morph FULLY cleaned up")
                     }
                 }
             }
@@ -686,7 +694,7 @@ KWin.TabBoxSwitcher {
             repeat: false
             onTriggered: {
                 if (tabBox.visible) {
-                    console.log("coverswitch morph fade-out timer fired, current opacity="
+                    debugLog("coverswitch2 morph fade-out timer fired, current opacity="
                                 + morphLayer.opacity)
                     morphLayer.fadeOut()
                 }
@@ -710,11 +718,11 @@ KWin.TabBoxSwitcher {
             ignoreUnknownSignals: true
 
             function onAboutToHide() {
-                console.log("coverswitch.win aboutToHide t=" + Date.now())
+                debugLog("coverswitch2.win aboutToHide t=" + Date.now())
             }
 
             function onClosing() {
-                console.log("coverswitch.win closing t=" + Date.now())
+                debugLog("coverswitch2.win closing t=" + Date.now())
             }
         }
     }
@@ -724,19 +732,19 @@ KWin.TabBoxSwitcher {
         ignoreUnknownSignals: true
 
         function onVisibleChanged() {
-            console.log("coverswitch.signal visibleChanged=" + tabBox.visible + " t=" + Date.now())
+            debugLog("coverswitch2.signal visibleChanged=" + tabBox.visible + " t=" + Date.now())
         }
 
         function onCurrentIndexChanged() {
-            console.log("coverswitch.signal currentIndexChanged=" + tabBox.currentIndex + " t=" + Date.now())
+            debugLog("coverswitch2.signal currentIndexChanged=" + tabBox.currentIndex + " t=" + Date.now())
         }
 
         function onSelectedItemChanged() {
-            console.log("coverswitch.signal selectedItemChanged=" + (tabBox.selectedItem || "") + " t=" + Date.now())
+            debugLog("coverswitch2.signal selectedItemChanged=" + (tabBox.selectedItem || "") + " t=" + Date.now())
         }
 
         function onAboutToHide() {
-            console.log("coverswitch.signal aboutToHide t=" + Date.now())
+            debugLog("coverswitch2.signal aboutToHide t=" + Date.now())
         }
     }
 

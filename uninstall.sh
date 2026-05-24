@@ -320,7 +320,7 @@ if [[ "$restored_shortcuts" -eq 0 ]]; then
   write_key --file kglobalshortcutsrc --group kwin --key "Window Maximize" "Meta+PgUp,Meta+PgUp,Maximize Window"
   write_key --file kglobalshortcutsrc --group kwin --key "Window Quick Tile Top" "Meta+Up,Meta+Up,Quick Tile Window to the Top"
 fi
-for off in magiclamp wobblywindows glide sheet fadedesktop cube coverswitch-zoom-in; do
+for off in magiclamp wobblywindows glide sheet fadedesktop cube coverswitch2-zoom-in; do
   kwin_effect unloadEffect "$off"
 done
 for on in squash slide blur; do
@@ -328,7 +328,7 @@ for on in squash slide blur; do
 done
 
 # ---------------------------------------------------------------------------
-echo "==> 6/16  Cover Switch + Flip Switch tabbox layouts"
+echo "==> 6/16  Cover Switch 2 tabbox layout"
 if [[ "$restored_kwin" -eq 0 ]]; then
   write_key --file kwinrc --group TabBox --key LayoutName "org.kde.breeze.desktop"
   write_key --file kwinrc --group TabBoxAlternative --key LayoutName "org.kde.breeze.desktop"
@@ -336,8 +336,8 @@ if [[ "$restored_kwin" -eq 0 ]]; then
   delete_key --file kwinrc --group TabBox --key DelayTime
   delete_key --file kwinrc --group TabBox --key HighlightWindows
 fi
-rm -rf "$HOME/.local/share/kwin/tabbox/coverswitch" "$HOME/.local/share/kwin/tabbox/flipswitch" 2>/dev/null || warn "Could not remove tabbox layouts"
-echo "    Removed custom tabbox layout directories if present"
+rm -rf "$HOME/.local/share/kwin/tabbox/coverswitch2" 2>/dev/null || warn "Could not remove Cover Switch 2 layout"
+echo "    Removed Cover Switch 2 layout directory if present"
 
 # ---------------------------------------------------------------------------
 echo "==> 7/16  Panel opacity, floating state, battery, and clock"
@@ -585,13 +585,13 @@ rm -rf "$HOME/.local/share/plasma/plasmoids/cachyos.workspace-indicator" 2>/dev/
 echo "    Removed custom workspace indicator plasmoid"
 
 # ---------------------------------------------------------------------------
-echo "==> 13/16  Cover Switch zoom-in KWin effect"
-kwin_effect unloadEffect coverswitch-zoom-in
+echo "==> 13/16  Cover Switch 2 zoom-in KWin effect"
+kwin_effect unloadEffect coverswitch2-zoom-in
 if [[ "$restored_kwin" -eq 0 ]]; then
-  write_key --file kwinrc --group Plugins --key coverswitch-zoom-inEnabled --type bool false
+  write_key --file kwinrc --group Plugins --key coverswitch2-zoom-inEnabled --type bool false
 fi
-rm -rf "$HOME/.local/share/kwin/effects/coverswitch-zoom-in" 2>/dev/null || warn "Could not remove coverswitch-zoom-in effect"
-echo "    Disabled and removed coverswitch-zoom-in"
+rm -rf "$HOME/.local/share/kwin/effects/coverswitch2-zoom-in" 2>/dev/null || warn "Could not remove coverswitch2-zoom-in effect"
+echo "    Disabled and removed coverswitch2-zoom-in"
 
 # ---------------------------------------------------------------------------
 echo "==> 14/16  Shortcuts, KRunner, Konsole, VSCode, and zsh"

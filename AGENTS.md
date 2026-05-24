@@ -30,8 +30,8 @@ Document the runtime geometry values first, especially:
 
 Any local test fix for Cover Switch usually needs to be applied to both:
 
-- `assets/coverswitch/contents/ui/main.qml`
-- `~/.local/share/kwin/tabbox/coverswitch/contents/ui/main.qml`
+- `assets/coverswitch2/contents/ui/main.qml`
+- `~/.local/share/kwin/tabbox/coverswitch2/contents/ui/main.qml`
 
 Do not run `install.sh` just to test Cover Switch QML unless explicitly asked.
 Patch the installed QML directly for local testing and reload KWin.

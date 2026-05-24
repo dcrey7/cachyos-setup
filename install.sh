@@ -402,17 +402,11 @@ qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect blur >/dev/null 2>&
 echo "    Effects loaded: magiclamp(700ms), wobbly, glide, sheet, slide, cube, blur"
 
 # ---------------------------------------------------------------------------
-echo "==> 6/16  Cover Switch + Flip Switch tabbox layouts (rescued from KDE MR !91)"
+echo "==> 6/16  Cover Switch 2 tabbox layout"
 #
-# Honest context: the 3D Cover Switch / Flip Switch from KDE 4.x/5.x was REMOVED
-# in Plasma 6 and there is NO replacement in the official KDE Store, AUR, or
-# any community project as of 2026.
-#
-# What we do here: install the QML rewrite that Ismael Asensio wrote in 2021
-# (merge request !91 in kdeplasma-addons -- abandoned, branch deleted upstream,
-# but we rescued the .qml + metadata from the MR patch file). It was written
-# for Plasma 5.24, so it MAY need import tweaks on your specific Plasma 6
-# point release.
+# CachyOS/Plasma may already ship a system "coverswitch" package. Install this
+# repo's GNOME-styled version under a distinct "coverswitch2" package ID so it
+# can coexist with the system layout and be tested/published independently.
 #
 # If after install the layouts don't show up in System Settings -> Task
 # Switcher or KWin throws QML errors, see the diagnostic message at the bottom
@@ -422,89 +416,8 @@ ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/assets"
 TABBOX_DIR="$HOME/.local/share/kwin/tabbox"
 mkdir -p "$TABBOX_DIR"
 
-panel_reserve=""
-panel_reserve_source=""
-
-is_positive_int() {
-  [[ "$1" =~ ^[0-9]+$ && "$1" -gt 0 ]]
-}
-
-panel_reserve="$(
-  qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript '
-    var p = panels().find(function(p){ return p.location === "bottom"; });
-    if (p) print(p.height);
-  ' 2>/dev/null | grep -E '^[0-9]+$' | head -1
-)" || true
-
-if is_positive_int "$panel_reserve"; then
-  panel_reserve_source="live"
-else
-  panel_reserve=""
-  mapfile -t bottom_panel_ids < <(
-    awk '
-      function remember_panel() {
-        if (id != "" && is_panel && location == "4" && !seen[id]++) {
-          print id
-        }
-      }
-
-      /^\[Containments\]\[[0-9]+\]$/ {
-        remember_panel()
-        id = $0
-        sub(/^\[Containments\]\[/, "", id)
-        sub(/\]$/, "", id)
-        is_panel = 0
-        location = ""
-        next
-      }
-
-      /^\[/ {
-        remember_panel()
-        id = ""
-        is_panel = 0
-        location = ""
-        next
-      }
-
-      id != "" && /^plugin=org\.kde\.panel$/ {
-        is_panel = 1
-        next
-      }
-
-      id != "" && /^location=4$/ {
-        location = "4"
-        next
-      }
-
-      END {
-        remember_panel()
-      }
-    ' "$appletsrc" 2>/dev/null
-  )
-
-  for panel_id in "${bottom_panel_ids[@]}"; do
-    candidate="$(
-      kreadconfig6 --file plasmashellrc \
-        --group "PlasmaViews" \
-        --group "Panel $panel_id" \
-        --group "Defaults" \
-        --key thickness 2>/dev/null
-    )" || true
-    if is_positive_int "$candidate"; then
-      panel_reserve="$candidate"
-      panel_reserve_source="plasmashellrc"
-      break
-    fi
-  done
-fi
-
-if ! is_positive_int "$panel_reserve"; then
-  panel_reserve=44
-  panel_reserve_source="default"
-fi
-echo "    Cover Switch fallback panel reserve: ${panel_reserve}px (${panel_reserve_source}); QML refreshes from KWin clientArea at runtime"
-
-for layout in coverswitch flipswitch; do
+COVER_SWITCH_LAYOUT="coverswitch2"
+for layout in "$COVER_SWITCH_LAYOUT"; do
   src="$ASSETS_DIR/$layout"
   dest="$TABBOX_DIR/$layout"
   if [[ ! -d "$src" ]]; then
@@ -514,15 +427,12 @@ for layout in coverswitch flipswitch; do
   rm -rf "$dest"
   mkdir -p "$dest"
   cp -r "$src"/* "$dest/"
-  if [[ "$layout" == "coverswitch" ]]; then
-    sed "s/__PANEL_RESERVE__/$panel_reserve/g" \
-      "$src/contents/ui/main.qml" > "$dest/contents/ui/main.qml"
-  fi
   echo "    installed $layout -> $dest"
 done
 
-# Set Cover Switch as main Alt+Tab style, Flip Switch as Alt+Shift+Tab alt.
-kwriteconfig6 --file kwinrc --group "TabBox" --key LayoutName "coverswitch"
+# Set Cover Switch 2 as main Alt+Tab style, leaving the system coverswitch
+# package untouched. Flip Switch remains the packaged/system alternative.
+kwriteconfig6 --file kwinrc --group "TabBox" --key LayoutName "$COVER_SWITCH_LAYOUT"
 kwriteconfig6 --file kwinrc --group "TabBoxAlternative" --key LayoutName "flipswitch"
 # Disable the show-delay so the switcher appears instantly on Alt-Tab press.
 kwriteconfig6 --file kwinrc --group "TabBox" --key ShowDelay --type bool false
@@ -530,24 +440,25 @@ kwriteconfig6 --file kwinrc --group "TabBox" --key DelayTime 0
 # Make sure tabbox actually shows
 kwriteconfig6 --file kwinrc --group "TabBox" --key HighlightWindows --type bool true
 qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
-echo "    kwinrc: TabBox=coverswitch, TabBoxAlternative=flipswitch"
+echo "    kwinrc: TabBox=$COVER_SWITCH_LAYOUT, TabBoxAlternative=flipswitch"
 
 # Diagnostic: print where to look if it doesn't work.
 cat <<EOF
-    If Alt+Tab still uses the default switcher after re-login:
+    If Alt+Tab still uses the default/system switcher after re-login:
       1. Check kwin loaded the package:  ls $TABBOX_DIR
-      2. Check kwin QML errors:          journalctl --user -b 0 -g 'kwin.*qml\\|coverswitch\\|flipswitch' | tail -20
-      3. Most likely fix is updating QML imports in $TABBOX_DIR/coverswitch/contents/ui/main.qml:
+      2. Check kwin QML errors:          journalctl --user -b 0 -g 'kwin.*qml\\|coverswitch2\\|flipswitch' | tail -20
+      3. Most likely fix is updating QML imports in $TABBOX_DIR/coverswitch2/contents/ui/main.qml:
          old: 'import org.kde.plasma.core 2.0 as PlasmaCore'  ->  '2.1' or '6.0'
          old: 'import org.kde.kwin 2.0 as KWin'               ->  '3.0'
       4. If broken beyond repair, open the file and remove this section.
 EOF
 
 # ---------------------------------------------------------------------------
-echo "==> 7/16  Cover Switch zoom-in close effect"
+echo "==> 7/16  Cover Switch 2 zoom-in close effect"
 
-EFFECT_SRC="$ASSETS_DIR/kwin-effects/coverswitch-zoom-in"
-EFFECT_DEST="$HOME/.local/share/kwin/effects/coverswitch-zoom-in"
+EFFECT_ID="coverswitch2-zoom-in"
+EFFECT_SRC="$ASSETS_DIR/kwin-effects/$EFFECT_ID"
+EFFECT_DEST="$HOME/.local/share/kwin/effects/$EFFECT_ID"
 
 if [[ -d "$EFFECT_SRC" ]]; then
   mkdir -p "$(dirname "$EFFECT_DEST")"
@@ -555,14 +466,14 @@ if [[ -d "$EFFECT_SRC" ]]; then
   cp -r "$EFFECT_SRC" "$EFFECT_DEST"
   echo "    Installed effect -> $EFFECT_DEST"
 
-  kwriteconfig6 --file kwinrc --group "Plugins" --key coverswitch-zoom-inEnabled --type bool true
-  echo "    Enabled coverswitch-zoom-in"
+  kwriteconfig6 --file kwinrc --group "Plugins" --key "${EFFECT_ID}Enabled" --type bool true
+  echo "    Enabled $EFFECT_ID"
 
   qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
-  qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect coverswitch-zoom-in >/dev/null 2>&1 || true
-  qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect coverswitch-zoom-in >/dev/null 2>&1 || true
+  qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect "$EFFECT_ID" >/dev/null 2>&1 || true
+  qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect "$EFFECT_ID" >/dev/null 2>&1 || true
 else
-  echo "    SKIP  coverswitch-zoom-in: $EFFECT_SRC missing"
+  echo "    SKIP  $EFFECT_ID: $EFFECT_SRC missing"
 fi
 
 # ---------------------------------------------------------------------------

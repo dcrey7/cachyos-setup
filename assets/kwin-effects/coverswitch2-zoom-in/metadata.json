@@ -8,11 +8,11 @@
             }
         ],
         "Category": "Window Open/Close Animation",
-        "Description": "Zoom-in animation when activating a window via the Cover Switch Alt+Tab",
+        "Description": "Zoom-in animation when activating a window via Cover Switch 2 Alt+Tab",
         "EnabledByDefault": true,
-        "Id": "coverswitch-zoom-in",
+        "Id": "coverswitch2-zoom-in",
         "License": "GPL",
-        "Name": "Cover Switch Zoom-In",
+        "Name": "Cover Switch 2 Zoom-In",
         "Version": "1.0"
     },
     "X-Plasma-API": "javascript",
