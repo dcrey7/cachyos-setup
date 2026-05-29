@@ -7,7 +7,8 @@
 
 var coverSwitchZoomInEffect = {
     debug: false,
-    duration: animationTime(180),
+    cardScaleFactor: 0.60,
+    duration: animationTime(220),
     sessionActive: false,
     animationActive: false,
     sessionStartWindow: null,
@@ -21,7 +22,7 @@ var coverSwitchZoomInEffect = {
     },
 
     loadConfig: function () {
-        coverSwitchZoomInEffect.duration = animationTime(180);
+        coverSwitchZoomInEffect.duration = animationTime(220);
         coverSwitchZoomInEffect.log("coverswitch2-zoom-in loadConfig duration=" + coverSwitchZoomInEffect.duration);
     },
 
@@ -108,6 +109,25 @@ var coverSwitchZoomInEffect = {
         return windowRect;
     },
 
+    availableGeometryForWindow: function (window, screenRect) {
+        try {
+            if (typeof workspace !== "undefined"
+                    && typeof KWin !== "undefined"
+                    && workspace.clientArea
+                    && KWin.MaximizeArea !== undefined) {
+                var output = window && window.output ? window.output : null;
+                var desktop = workspace.currentDesktop;
+                var area = workspace.clientArea(KWin.MaximizeArea, output, desktop);
+                if (area && area.width > 0 && area.height > 0) {
+                    return area;
+                }
+            }
+        } catch (e) {
+        }
+
+        return screenRect;
+    },
+
     onTabBoxAdded: function (mode) {
         coverSwitchZoomInEffect.log("coverswitch2-zoom-in tabBoxAdded mode=" + mode);
         coverSwitchZoomInEffect.sessionActive = true;
@@ -185,10 +205,11 @@ var coverSwitchZoomInEffect = {
         }
 
         var screenRect = coverSwitchZoomInEffect.screenGeometryForWindow(window, rect);
-        var cardW = Math.round(screenRect.width * 0.45);
-        var cardH = Math.round(screenRect.height * 0.45);
-        var cardX = Math.round(screenRect.x + (screenRect.width - cardW) / 2);
-        var cardY = Math.round(screenRect.y + (screenRect.height - cardH) / 2);
+        var availableRect = coverSwitchZoomInEffect.availableGeometryForWindow(window, screenRect);
+        var cardW = Math.round(availableRect.width * coverSwitchZoomInEffect.cardScaleFactor);
+        var cardH = Math.round(availableRect.height * coverSwitchZoomInEffect.cardScaleFactor);
+        var cardX = Math.round(availableRect.x + (availableRect.width - cardW) / 2);
+        var cardY = Math.round(availableRect.y + availableRect.height * 0.48 - cardH / 2);
 
         // Translation is relative to the window's CURRENT position. We want the
         // animation to LOOK like the window starts at the card rect (cardX, cardY)
@@ -198,6 +219,7 @@ var coverSwitchZoomInEffect = {
 
         coverSwitchZoomInEffect.log("coverswitch2-zoom-in runZoomIn window=" + window.caption
             + " rect=" + JSON.stringify(rect)
+            + " available=" + JSON.stringify(availableRect)
             + " card=" + cardX + "," + cardY + " " + cardW + "x" + cardH
             + " fromTrans=" + fromTransX + "," + fromTransY);
 

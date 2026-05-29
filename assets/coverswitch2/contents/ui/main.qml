@@ -321,7 +321,7 @@ KWin.TabBoxSwitcher {
         }
         if ((fromIndex === thumbnailView.count - 1 && toIndex === 0)
                 || (fromIndex === 0 && toIndex === thumbnailView.count - 1)) {
-            return thumbnailView.count - 1
+            return 1
         }
         return Math.abs(fromIndex - toIndex)
     }
@@ -332,13 +332,30 @@ KWin.TabBoxSwitcher {
         }
 
         var distance = highlightMoveDistance(fromIndex, toIndex)
-        var duration = distance > 1
+        var isWrap = (fromIndex === thumbnailView.count - 1 && toIndex === 0)
+                || (fromIndex === 0 && toIndex === thumbnailView.count - 1)
+        var duration = isWrap
+                ? thumbnailView.wrapHighlightMoveDuration
+                : distance > 1
                 ? Math.max(thumbnailView.baseHighlightMoveDuration, distance * 110)
                 : thumbnailView.baseHighlightMoveDuration
         thumbnailView.highlightMoveDuration = duration
-        thumbnailView.wrapInProgress = distance > 1
+        thumbnailView.activeOvershoot = isWrap
+                ? thumbnailView.wrapOvershoot
+                : thumbnailView.defaultOvershoot
+        thumbnailView.wrapInProgress = isWrap || distance > 1
         highlightDurationResetTimer.interval = duration + 50
         highlightDurationResetTimer.restart()
+        wrapBounceAnimation.stop()
+        thumbnailView.wrapBounceX = 0
+        if (isWrap) {
+            thumbnailView.wrapBounceDirection =
+                    (fromIndex === thumbnailView.count - 1 && toIndex === 0) ? -1 : 1
+            wrapBounceTimer.interval = duration
+            wrapBounceTimer.restart()
+        } else {
+            wrapBounceTimer.stop()
+        }
     }
 
     function setCurrentIndexWrapped(nextIndex) {
@@ -392,7 +409,6 @@ KWin.TabBoxSwitcher {
         width: tabBox.rawScreenWidth
         height: Math.max(1, tabBox.rawScreenHeight - tabBox.panelReserve)
         flags: Qt.BypassWindowManagerHint | Qt.FramelessWindowHint
-        visibility: Window.Windowed
         visible: tabBox.visible
         color: "transparent"
 
@@ -459,7 +475,7 @@ KWin.TabBoxSwitcher {
 
             PathView {
                 id: thumbnailView
-                readonly property real previewRatio: 0.45
+                readonly property real previewRatio: 0.60
                 readonly property int boxWidth: Math.round(width * previewRatio)
                 readonly property int boxHeight: Math.round(height * previewRatio)
                 readonly property real centerY: height * 0.48
@@ -471,10 +487,16 @@ KWin.TabBoxSwitcher {
                 preferredHighlightEnd: 0.5
                 highlightRangeMode: PathView.StrictlyEnforceRange
                 readonly property int baseHighlightMoveDuration: 220
+                readonly property int wrapHighlightMoveDuration: 125
+                readonly property real defaultOvershoot: 1.7
+                readonly property real wrapOvershoot: 0.65
                 property bool wrapInProgress: false
-                property real activeOvershoot: 1.7
+                property int wrapBounceDirection: 1
+                property real wrapBounceX: 0
+                property real activeOvershoot: defaultOvershoot
                 highlightMoveDuration: baseHighlightMoveDuration
                 pathItemCount: 7
+                transform: Translate { x: thumbnailView.wrapBounceX }
 
                 Behavior on offset {
                     enabled: thumbnailView.wrapInProgress
@@ -627,7 +649,7 @@ KWin.TabBoxSwitcher {
 
         Item {
             id: morphLayer
-            property var windowId: undefined
+            property var windowId: null
             property real windowAspect: window.width / Math.max(1, window.height)
             property bool active: false
             property bool animationsEnabled: false
@@ -643,13 +665,20 @@ KWin.TabBoxSwitcher {
             width: window.width
             height: window.height
             transformOrigin: Item.TopLeft
-            visible: active
+            visible: active && windowId !== null
             z: 50
 
-            KWin.WindowThumbnail {
+            Loader {
                 anchors.fill: parent
-                wId: morphLayer.windowId
-                smooth: false
+                active: morphLayer.active && morphLayer.windowId !== null
+
+                sourceComponent: Component {
+                    KWin.WindowThumbnail {
+                        anchors.fill: parent
+                        wId: morphLayer.windowId
+                        smooth: false
+                    }
+                }
             }
 
             Behavior on x {
@@ -681,7 +710,7 @@ KWin.TabBoxSwitcher {
                                     + morphLayer.opacity + " setting active=false")
                         morphLayer.opacity = 0
                         morphLayer.active = false
-                        morphLayer.windowId = undefined
+                        morphLayer.windowId = null
                         debugLog("coverswitch2 morph FULLY cleaned up")
                     }
                 }
@@ -710,6 +739,46 @@ KWin.TabBoxSwitcher {
                     thumbnailView.highlightMoveDuration = thumbnailView.baseHighlightMoveDuration
                     thumbnailView.wrapInProgress = false
                 }
+            }
+        }
+
+        Timer {
+            id: wrapBounceTimer
+            interval: thumbnailView ? thumbnailView.wrapHighlightMoveDuration : 125
+            repeat: false
+            onTriggered: if (thumbnailView) wrapBounceAnimation.restart()
+        }
+
+        SequentialAnimation {
+            id: wrapBounceAnimation
+
+            NumberAnimation {
+                target: thumbnailView
+                property: "wrapBounceX"
+                to: thumbnailView ? thumbnailView.wrapBounceDirection * 14 : 0
+                duration: 42
+                easing.type: Easing.OutQuad
+            }
+            NumberAnimation {
+                target: thumbnailView
+                property: "wrapBounceX"
+                to: thumbnailView ? thumbnailView.wrapBounceDirection * -7 : 0
+                duration: 58
+                easing.type: Easing.InOutQuad
+            }
+            NumberAnimation {
+                target: thumbnailView
+                property: "wrapBounceX"
+                to: thumbnailView ? thumbnailView.wrapBounceDirection * 3 : 0
+                duration: 46
+                easing.type: Easing.InOutQuad
+            }
+            NumberAnimation {
+                target: thumbnailView
+                property: "wrapBounceX"
+                to: 0
+                duration: 64
+                easing.type: Easing.OutCubic
             }
         }
 
@@ -783,7 +852,7 @@ KWin.TabBoxSwitcher {
             morphFadeAnim.stop()
             morphLayer.active = false
             morphLayer.opacity = 0
-            morphLayer.windowId = undefined
+            morphLayer.windowId = null
             fadeInStarted = false
             Qt.callLater(function() {
                 correctingCurrentIndex = true
