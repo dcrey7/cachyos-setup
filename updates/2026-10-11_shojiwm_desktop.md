@@ -6,7 +6,7 @@
 ## Files changed
 
 - `shojiwm/` (new):
-  - `patches/`: 40 ShojiWM commits on top of upstream `13c8eca`.
+  - `patches/`: 41 ShojiWM commits on top of upstream `13c8eca`.
   - `config/`: a snapshot of the ShojiWM config.
   - `lockscreen/hyprlock.conf`
   - `install.sh`
@@ -33,7 +33,8 @@ ShojiWM is a second login session with the same KDE look. See `shojiwm/README.md
 - The grid's hovered card shows the traffic lights: close, minimize, maximize.
 - Kickoff, the calendar and the tray popups slide out of the panel, KWin style (150 ms, OutQuint in, InCubic out).
 - plasmashell gets `KDE_FULL_SESSION=true` and `KDE_SESSION_VERSION=6`.
-- The patches are now 40 commits (tree `cdbdee4`).
+- Coverflow: the centre card's traffic lights work, a middle click closes a card, q closes the selected window.
+- The patches are now 41 commits (tree `d91f1dd`).
 
 ## Workspace circles widget
 

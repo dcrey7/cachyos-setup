@@ -1,7 +1,7 @@
 From 3969178f6caece1864748763822a8f5419172a1e Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 17:43:39 +0200
-Subject: [PATCH 14/40] Rebuild the drag effect as KDE-style wobbly windows
+Subject: [PATCH 14/41] Rebuild the drag effect as KDE-style wobbly windows
 
 A 4x4 grid of springs bends the window around the grabbed point. Only
 15% of the window's motion becomes bend (KDE's move factor) and every

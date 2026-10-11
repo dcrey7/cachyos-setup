@@ -1,7 +1,7 @@
 From 78c1f219cc6908945ed3a15954d24771a55758ac Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 22:41:45 +0200
-Subject: [PATCH 32/40] Coverflow: keep cards on screen, open and close without
+Subject: [PATCH 32/41] Coverflow: keep cards on screen, open and close without
  crossing
 
 - The whole layout shrinks evenly when, for any selection, a stack's

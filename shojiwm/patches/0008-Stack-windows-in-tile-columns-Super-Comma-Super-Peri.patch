@@ -1,7 +1,7 @@
 From dc6dc9d5182c995be1a0553527d791a04ad23f02 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 16:09:05 +0200
-Subject: [PATCH 08/40] Stack windows in tile columns (Super+Comma /
+Subject: [PATCH 08/41] Stack windows in tile columns (Super+Comma /
  Super+Period)
 
 A column can hold several windows that split its height evenly.

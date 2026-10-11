@@ -1,7 +1,7 @@
 From b23fcd5e9af972d1e9fd6b8204467237f21e2572 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 23:41:00 +0200
-Subject: [PATCH 40/40] Popups slide in 150 ms with a softer landing
+Subject: [PATCH 40/41] Popups slide in 150 ms with a softer landing
 
 ---
  packages/config/src/sliding-popups.ts | 13 ++++++++-----

@@ -65,7 +65,7 @@ Effects, ported from their original code:
 
 - Wobbly drag: KWin's wobblywindows physics, level 2, with 80% opacity while dragging.
 - Magic Lamp: KWin's magiclamp, into and out of the app's taskbar icon. It runs on minimize, restore and app open.
-- Coverflow Alt+Tab: GNOME's Coverflow Alt-Tab layout, with Flip 3D's intro, outro, backdrop and white glow.
+- Coverflow Alt+Tab: GNOME's Coverflow Alt-Tab layout, with Flip 3D's intro, outro, backdrop and white glow. The centre card's traffic lights work, a middle click closes a card, and q closes the selected window.
 - Sliding popups: KWin's slidingpopups. Kickoff, the calendar and the tray popups slide out of the panel (150 ms).
 - Window grid (Super+Tab) and Window View: windows in balanced rows and columns. The hovered card shows the traffic lights, so you can close, minimize or maximize from the view.
 

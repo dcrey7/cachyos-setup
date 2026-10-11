@@ -1,7 +1,7 @@
 From bb1ed1ba8e4023b1239c60845ae88a5d1f1c4aa3 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 16:25:39 +0200
-Subject: [PATCH 09/40] Use the KDE desktop (taskbar, Kickoff, wallpaper) in a
+Subject: [PATCH 09/41] Use the KDE desktop (taskbar, Kickoff, wallpaper) in a
  real session
 
 plasmashell and the KDE polkit agent start when ShojiWM is not running

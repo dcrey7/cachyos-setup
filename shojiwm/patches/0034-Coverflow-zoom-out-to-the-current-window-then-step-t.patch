@@ -1,7 +1,7 @@
 From 1912b328f968eb0e332a3e9452af98aa081df1f1 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 23:26:59 +0200
-Subject: [PATCH 34/40] Coverflow: zoom out to the current window, then step to
+Subject: [PATCH 34/41] Coverflow: zoom out to the current window, then step to
  the next
 
 The switcher now opens on the current window: it shrinks from its real

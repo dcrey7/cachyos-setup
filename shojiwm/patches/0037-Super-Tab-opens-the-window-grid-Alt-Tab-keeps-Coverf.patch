@@ -1,7 +1,7 @@
 From fff3b3b0bf0ff75c32564c95527cdc6a74ac44a2 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 23:35:18 +0200
-Subject: [PATCH 37/40] Super+Tab opens the window grid, Alt+Tab keeps
+Subject: [PATCH 37/41] Super+Tab opens the window grid, Alt+Tab keeps
  Coverflow
 
 ---

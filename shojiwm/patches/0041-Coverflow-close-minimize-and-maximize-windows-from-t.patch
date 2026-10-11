@@ -1,0 +1,213 @@
+From 89ff6ecd3b67a6bb3acb4ffcb2842e19ba2381d3 Mon Sep 17 00:00:00 2001
+From: Abhishek <abhishek01789@gmail.com>
+Date: Sun, 11 Oct 2026 23:46:13 +0200
+Subject: [PATCH 41/41] Coverflow: close, minimize and maximize windows from
+ the cards
+
+- The selected (centre) card shows its traffic lights while Alt+Tab is
+  open, and they work: close, maximize (switches to it), minimize.
+- A middle click on any card closes its window; q closes the selected
+  one, as in the GNOME extension.
+- When a window closes, its card fades out and the next window slides
+  into the middle and is selected, so the title label follows. Closing
+  the last window ends the switcher.
+- Switcher core: only the selected card's title bar buttons act (the
+  other cards do not show them), a layout's windowsChanged gets the
+  controls, the cards keep a selection the layout made after a close,
+  and a fading card keeps its 3D turn.
+- debug.windowSwitcher gets a pointer action for tests.
+---
+ packages/config/src/coverflow.tsx       | 43 +++++++++++++++++++++++++
+ packages/config/src/index.tsx           | 20 ++++++++----
+ packages/config/src/window-switcher.tsx | 17 +++++++---
+ 3 files changed, 70 insertions(+), 10 deletions(-)
+
+diff --git a/packages/config/src/coverflow.tsx b/packages/config/src/coverflow.tsx
+index 6687390..7cdc9a3 100644
+--- a/packages/config/src/coverflow.tsx
++++ b/packages/config/src/coverflow.tsx
+@@ -103,6 +103,8 @@ type FlipDirection = "to-left" | "to-right";
+ 
+ interface CoverflowState {
+   windows: readonly WaylandWindow[];
++  /** The windows' ids when the cards were last laid out (to spot a closed one). */
++  ids: string[];
+   /**
+    * The whole layout's scale (1 or less), so no card leaves the screen for
+    * any selection. Worked out once, on the first frame.
+@@ -187,10 +189,45 @@ function step(state: CoverflowState, controls: SwitcherControls, steps: number)
+ const COVERFLOW_LAYOUT: SwitcherLayout<CoverflowState> = {
+   name: "coverflow",
+   dimAlpha: SWITCHER_DIM_ALPHA,
++  // The selected card's traffic lights work, and a middle click closes a card.
++  cardActions: true,
++
++  // A window closed: drop its card. The window after it (or the last one)
++  // slides into the middle and is selected.
++  windowsChanged(state, controls) {
++    const alive = new Set(state.windows.map((window) => window.id));
++    const removed = state.ids.findIndex((id) => !alive.has(id));
++    if (removed < 0) {
++      return;
++    }
++    state.ids.splice(removed, 1);
++    state.cards.splice(removed, 1);
++    state.count = state.windows.length;
++    if (state.count === 0) {
++      return;
++    }
++    let selection = state.selection;
++    if (removed < selection) {
++      selection -= 1;
++    }
++    selection = Math.min(selection, state.count - 1);
++    // Every card moves from where it is to its new place.
++    for (const card of state.cards) {
++      if (card) {
++        card.selection = -1;
++      }
++    }
++    state.selection = selection;
++    state.changedAtMs = state.nowMs;
++    state.flip = null;
++    state.introStep = false;
++    controls.select(selection);
++  },
+   cameraFovDegrees: CLUTTER_FOV_DEGREES,
+ 
+   begin: (windows) => ({
+     windows,
++    ids: windows.map((window) => window.id),
+     layoutScale: null,
+     count: windows.length,
+     nowMs: 0,
+@@ -289,6 +326,12 @@ const COVERFLOW_LAYOUT: SwitcherLayout<CoverflowState> = {
+       case "Up":
+         previous(state, controls);
+         return true;
++      case "q": {
++        // As in the extension: q closes the selected window.
++        const window = controls.windows[mod(controls.selected, controls.windows.length)];
++        window?.close();
++        return true;
++      }
+     }
+     return false;
+   },
+diff --git a/packages/config/src/index.tsx b/packages/config/src/index.tsx
+index b825107..d6bd736 100644
+--- a/packages/config/src/index.tsx
++++ b/packages/config/src/index.tsx
+@@ -172,6 +172,7 @@ const WINDOW_SWITCHER = (
+     window.state[WINDOW_STATE_FULLSCREEN]()
+       ? FULLSCREEN_Z_INDEX
+       : windowZIndex(window),
++  titlebarButtonAt: (window, x, y) => titlebarButtonAt(window, x, y),
+ });
+ // KDE's Window View: the taskbar's "show windows side by side" for a group
+ // of windows (see the `windowView.activate` IPC command).
+@@ -488,10 +489,13 @@ WORKSPACE_IPC.handle("debug.windowViewPointer", (params) => {
+ // Debug: drive the window switcher without the real keyboard. `action`:
+ // "open", "key" (`key`, `shift`) or "cancel". Returns the selected window's id.
+ WORKSPACE_IPC.handle("debug.windowSwitcher", (params) => {
+-  const { action, key, shift } = (params ?? {}) as {
+-    action?: "open" | "key" | "cancel";
++  const { action, key, shift, x, y, button } = (params ?? {}) as {
++    action?: "open" | "key" | "cancel" | "pointer";
+     key?: string;
+     shift?: boolean;
++    x?: number;
++    y?: number;
++    button?: "left" | "middle";
+   };
+   if (action === "open") {
+     WINDOW_SWITCHER.open(HYBRID_WINDOW_MANAGER.getCurrentMonitorName());
+@@ -499,6 +503,8 @@ WORKSPACE_IPC.handle("debug.windowSwitcher", (params) => {
+     WINDOW_SWITCHER.cancel();
+   } else if (action === "key" && typeof key === "string") {
+     return WINDOW_SWITCHER.debugKey(key, shift);
++  } else if (action === "pointer" && typeof x === "number" && typeof y === "number") {
++    return WINDOW_SWITCHER.debugPointer(x, y, button);
+   }
+   return SWITCHERS.selectedWindowId.peek();
+ });
+@@ -1855,14 +1861,16 @@ const TRAFFIC_LIGHT_SIZE = 12;
+ const TITLEBAR_PADDING_X = 8;
+ const TITLEBAR_GAP = 8;
+ 
+-/** The window is the hovered card of the Window View or the grid. */
++/** The window is the hovered card of the Window View or the grid, or Alt+Tab's selected card. */
+ const isWindowViewCard = (window: WaylandWindow) =>
+   WINDOW_VIEW.selectedWindowId() === window.id ||
+-  WINDOW_GRID.selectedWindowId() === window.id;
++  WINDOW_GRID.selectedWindowId() === window.id ||
++  WINDOW_SWITCHER.selectedWindowId() === window.id;
+ 
+-/** While the Window View or the grid is open, only its hovered card shows traffic lights. */
++/** While a switcher is open, only its hovered or selected card shows traffic lights. */
+ const trafficLightsShown = (window: WaylandWindow) =>
+-  (!WINDOW_VIEW.isOpen() && !WINDOW_GRID.isOpen()) || isWindowViewCard(window);
++  (!WINDOW_VIEW.isOpen() && !WINDOW_GRID.isOpen() && !WINDOW_SWITCHER.isOpen()) ||
++  isWindowViewCard(window);
+ 
+ /**
+  * The traffic light at `(x, y)`, logical px from the top-left corner of
+diff --git a/packages/config/src/window-switcher.tsx b/packages/config/src/window-switcher.tsx
+index a0b4bd8..0f04c68 100644
+--- a/packages/config/src/window-switcher.tsx
++++ b/packages/config/src/window-switcher.tsx
+@@ -191,7 +191,7 @@ export interface SwitcherLayout<State> {
+   /** How opaque a minimized window's card is (default 1). */
+   readonly minimizedOpacity?: number;
+   /** A window left `state.windows` (it closed): lay out the rest again. */
+-  windowsChanged?(state: State): void;
++  windowsChanged?(state: State, controls: SwitcherControls): void;
+ }
+ 
+ /** A title bar button. */
+@@ -699,7 +699,8 @@ export function createWindowSwitcher<State>(
+         if (event.buttonName !== "left") {
+           return;
+         }
+-        if (hit && layout.cardActions && session.phase === "shown") {
++        // Only the selected card shows its title bar buttons.
++        if (hit && layout.cardActions && session.phase === "shown" && hit.window === selectedWindow(session)) {
+           const button = options.titlebarButtonAt?.(hit.window, hit.x, hit.y) ?? null;
+           if (button) {
+             pressCardButton(session, hit.window, button);
+@@ -816,7 +817,7 @@ export function createWindowSwitcher<State>(
+     session.cardAlpha.delete(window.id);
+     session.hasSelection = false;
+     setSelectedWindowId(null);
+-    layout.windowsChanged?.(session.state);
++    layout.windowsChanged?.(session.state, session.controls);
+     session.moveProgress = 0;
+     ensureTicking(session);
+     touch();
+@@ -830,6 +831,9 @@ export function createWindowSwitcher<State>(
+       close(session, null);
+       return;
+     }
++    if (session.hasSelection) {
++      return; // The layout picked the next window itself.
++    }
+     const cursor = COMPOSITOR.cursor.getPosition();
+     const window = cursor ? windowAt(session, cursor.x, cursor.y) : undefined;
+     if (window) {
+@@ -1041,7 +1045,12 @@ export function createWindowSwitcher<State>(
+         pose,
+         planeWidth: rect.width + MARGIN * 2,
+         planeHeight: rect.height + MARGIN * 2,
+-        transform: transform3d().translate(pose.x, pose.y, pose.z).scale(pose.scale),
++        // Keeps its turn (a Coverflow side card stays turned while it fades).
++        transform: transform3d()
++          .translate(pose.x, pose.y, pose.z)
++          .rotateX(pose.rotateX)
++          .rotateY(pose.rotateY)
++          .scale(pose.scale),
+       };
+     });
+   }
+-- 
+2.56.0
+

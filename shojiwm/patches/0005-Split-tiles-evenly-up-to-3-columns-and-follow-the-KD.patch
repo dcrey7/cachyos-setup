@@ -1,7 +1,7 @@
 From 4e458eb37731a510cdd3fca5fe8439466b5c01fb Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 15:52:04 +0200
-Subject: [PATCH 05/40] Split tiles evenly up to 3 columns and follow the KDE
+Subject: [PATCH 05/41] Split tiles evenly up to 3 columns and follow the KDE
  dark theme
 
 ---

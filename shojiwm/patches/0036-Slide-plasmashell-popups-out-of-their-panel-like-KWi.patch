@@ -1,7 +1,7 @@
 From e5ec561ed1f67dc5f107b7a6def095a876e24f93 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 23:32:04 +0200
-Subject: [PATCH 36/40] Slide plasmashell popups out of their panel, like
+Subject: [PATCH 36/41] Slide plasmashell popups out of their panel, like
  KWin's sliding popups
 
 - Kickoff, the calendar, tray popups and the grouped-window list slide

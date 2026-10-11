@@ -1,7 +1,7 @@
 From 972ae921fd5920a221eed13611a57f52360267d0 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 16:51:11 +0200
-Subject: [PATCH 12/40] Tell plasmashell it runs on KDE inside the ShojiWM
+Subject: [PATCH 12/41] Tell plasmashell it runs on KDE inside the ShojiWM
  session
 
 ---

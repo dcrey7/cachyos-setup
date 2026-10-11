@@ -1,7 +1,7 @@
 From d5e091fc65eed29a4907fbcc751a745998cb40aa Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 20:46:08 +0200
-Subject: [PATCH 22/40] Answer KWin's screenshot D-Bus calls so Spectacle works
+Subject: [PATCH 22/41] Answer KWin's screenshot D-Bus calls so Spectacle works
 
 ---
  .../config/src/helpers/screenshot-dbus.py     | 268 ++++++++++++++++++

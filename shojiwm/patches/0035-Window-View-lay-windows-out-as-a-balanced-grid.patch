@@ -1,7 +1,7 @@
 From 2080a23fec3cde7d4aa6efeaf30a638d00db04f0 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 23:31:57 +0200
-Subject: [PATCH 35/40] Window View: lay windows out as a balanced grid
+Subject: [PATCH 35/41] Window View: lay windows out as a balanced grid
 
 ceil(sqrt(n)) columns and as many rows as needed, the last row centred:
 2 side by side, 3 as 2 + 1, 4 as 2 x 2, 5 as 3 + 2. The old rule picked

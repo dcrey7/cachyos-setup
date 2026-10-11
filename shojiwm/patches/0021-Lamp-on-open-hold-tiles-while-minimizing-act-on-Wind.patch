@@ -1,7 +1,7 @@
 From 2b007d22c12bf7c117c12ff11eecdb1518eb4a0d Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 20:45:54 +0200
-Subject: [PATCH 21/40] Lamp on open, hold tiles while minimizing, act on
+Subject: [PATCH 21/41] Lamp on open, hold tiles while minimizing, act on
  Window View cards
 
 - Magic Lamp also pours a new window out of its taskbar icon; it waits up

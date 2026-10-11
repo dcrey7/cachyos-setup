@@ -1,7 +1,7 @@
 From 1c77f6a162282c524efe8b9364673e45c1827d99 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 21:55:11 +0200
-Subject: [PATCH 26/40] Coverflow: show the selected window's icon and title
+Subject: [PATCH 26/41] Coverflow: show the selected window's icon and title
  under the cards
 
 As the GNOME extension does with its defaults (icon style Classic): a
