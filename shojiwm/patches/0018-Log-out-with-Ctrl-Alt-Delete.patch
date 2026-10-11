@@ -1,7 +1,7 @@
 From 90a384c14e5fdac193b8b26ec06bfe7a8668d6b2 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 18:01:50 +0200
-Subject: [PATCH 18/33] Log out with Ctrl+Alt+Delete
+Subject: [PATCH 18/40] Log out with Ctrl+Alt+Delete
 
 ---
  packages/config/src/index.tsx | 6 ++++++

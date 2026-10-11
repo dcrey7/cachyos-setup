@@ -1,7 +1,7 @@
 From c15208f2ed73601a628ef2dfafaffb98a6e56a84 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 21:52:35 +0200
-Subject: [PATCH 25/33] Show workspaces to KDE's Pager as virtual desktops
+Subject: [PATCH 25/40] Show workspaces to KDE's Pager as virtual desktops
 
 - org_kde_plasma_virtual_desktop_management: desktops 1..N of the current
   monitor (N = highest workspace in use or shown), named "Desktop N",

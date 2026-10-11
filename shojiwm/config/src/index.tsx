@@ -71,6 +71,12 @@ import {
   magicLampForget,
   magicLampRunning,
 } from "./magic-lamp";
+import {
+  configureSlidingPopups,
+  slidePopupIn,
+  slidePopupOut,
+  slidingPopupsDebug,
+} from "./sliding-popups";
 
 COMPOSITOR.env.apply({
   QT_QPA_PLATFORM: "wayland;xcb",
@@ -177,21 +183,41 @@ const WINDOW_VIEW = createWindowView({
       : windowZIndex(window),
   titlebarButtonAt: (window, x, y) => titlebarButtonAt(window, x, y),
 });
+// Super+Tab: every window of every app side by side, in rows and columns.
+const WINDOW_GRID = createWindowGrid({
+  windowManager: HYBRID_WINDOW_MANAGER,
+  stackOrder: (window) =>
+    window.state[WINDOW_STATE_FULLSCREEN]()
+      ? FULLSCREEN_Z_INDEX
+      : windowZIndex(window),
+  titlebarButtonAt: (window, x, y) => titlebarButtonAt(window, x, y),
+});
 COMPOSITOR.rendering.composition = (output) =>
   WINDOW_SWITCHER.compose(output) ??
+  WINDOW_GRID.compose(output) ??
   WINDOW_VIEW.compose(output) ?? <DefaultComposition />;
 
-/** What both switchers share with the rest of the config. */
+/** What the switchers share with the rest of the config. */
 const SWITCHERS = {
   blurSuspended: computed(
-    () => WINDOW_SWITCHER.blurSuspended() || WINDOW_VIEW.blurSuspended(),
+    () =>
+      WINDOW_SWITCHER.blurSuspended() ||
+      WINDOW_GRID.blurSuspended() ||
+      WINDOW_VIEW.blurSuspended(),
   ),
   backdropStrength: computed(() =>
-    Math.min(WINDOW_SWITCHER.backdropStrength(), WINDOW_VIEW.backdropStrength()),
+    Math.min(
+      WINDOW_SWITCHER.backdropStrength(),
+      WINDOW_GRID.backdropStrength(),
+      WINDOW_VIEW.backdropStrength(),
+    ),
   ),
-  // Both glow the same white around the selected window.
+  // All glow the same white around the selected window.
   selectedWindowId: computed(
-    () => WINDOW_SWITCHER.selectedWindowId() ?? WINDOW_VIEW.selectedWindowId(),
+    () =>
+      WINDOW_SWITCHER.selectedWindowId() ??
+      WINDOW_GRID.selectedWindowId() ??
+      WINDOW_VIEW.selectedWindowId(),
   ),
 };
 
@@ -484,6 +510,11 @@ if (WINDOW_SWITCHER_STYLE === "coverflow") {
 }
 
 // Debug: the last Magic Lamp runs with frame times; `durationMs` slows it.
+// Debug: slow the sliding popups down (`durationMs`), `null` restores KWin's.
+WORKSPACE_IPC.handle("debug.slidingPopups", (params) => {
+  slidingPopupsDebug((params as { durationMs?: number | null } | undefined)?.durationMs ?? null);
+});
+
 WORKSPACE_IPC.handle("debug.magicLamp", (params) => ({
   runs: magicLampDebug(
     (params as { durationMs?: number | null } | undefined)?.durationMs,
@@ -636,7 +667,14 @@ if (!INSIDE_KDE) {
     ],
     // The session says "ShojiWM"; plasmashell wants to know it runs KDE.
     // XDG_MENU_PREFIX: Kickoff reads its app list from plasma-applications.menu.
-    env: { XDG_CURRENT_DESKTOP: "KDE", XDG_MENU_PREFIX: "plasma-" },
+    // KDE_FULL_SESSION and KDE_SESSION_VERSION: KDE libraries only apply
+    // KDE behaviour (like panel-coloured tray icons) in a full KDE session.
+    env: {
+      XDG_CURRENT_DESKTOP: "KDE",
+      XDG_MENU_PREFIX: "plasma-",
+      KDE_FULL_SESSION: "true",
+      KDE_SESSION_VERSION: "6",
+    },
     restart: "on-exit",
   });
   // Owns KWin's Window View D-Bus name, so the taskbar shows a group's
@@ -776,7 +814,7 @@ COMPOSITOR.key.bind("clipboard", "Super+V", () => {
 COMPOSITOR.key.bind("settings", "Super+I", () => {
   COMPOSITOR.process.spawn({ command: "systemsettings" });
 });
-// Alt+Tab opens ShojiWM's window switcher, the same one as Super+Tab.
+// Alt+Tab opens the window switcher (Coverflow). Super+Tab opens the grid.
 COMPOSITOR.key.bind("alt-tab-switcher", "Alt+Tab", () => {
   WINDOW_SWITCHER.open(HYBRID_WINDOW_MANAGER.getCurrentMonitorName());
 });
@@ -843,8 +881,8 @@ COMPOSITOR.key.bind("toggle-tiling-mode", "Super+S", () => {
   HYBRID_WINDOW_MANAGER.toggleCurrentWorkspaceTiling();
   scheduleWorkspaceBroadcast();
 });
-COMPOSITOR.key.bind("window-switcher", "Super+Tab", () => {
-  WINDOW_SWITCHER.open(HYBRID_WINDOW_MANAGER.getCurrentMonitorName());
+COMPOSITOR.key.bind("window-grid", "Super+Tab", () => {
+  WINDOW_GRID.open(HYBRID_WINDOW_MANAGER.getCurrentMonitorName());
 });
 COMPOSITOR.key.bind("close-focused-window", "Super+Q", () => {
   HYBRID_WINDOW_MANAGER.closeFocusedWindow();
@@ -1167,10 +1205,16 @@ const LAYER_BLUR_MASK = compileLayerEffect({
 const JELLY_DRAG = true;
 // Magic Lamp (KDE's minimize effect, ./magic-lamp.ts): a minimizing window
 // pours into its taskbar entry. It wins over the jelly drag while it runs.
-configureMagicLamp({
-  // KWin's "docks": plasma panels (windows or layer-shell surfaces) and any
-  // other bar.
-  panels: () => [
+configureMagicLamp({ panels: () => panelRects() });
+// The popups slide out of these panels too (KWin's sliding popups).
+configureSlidingPopups({ panels: () => panelRects() });
+
+/**
+ * KWin's "docks": plasma panels (windows or layer-shell surfaces) and any
+ * other bar, in global logical px.
+ */
+function panelRects() {
+  return [
     ...plasmaShellWindows("panel").map((window) => ({
       x: window.rect.x,
       y: window.rect.y,
@@ -1194,8 +1238,8 @@ configureMagicLamp({
           },
         ];
       }),
-  ],
-});
+  ];
+}
 COMPOSITOR.effect.window = (window) =>
   magicLampEffect(window) ?? (JELLY_DRAG ? jellyDragEffect(window) : null);
 
@@ -1302,8 +1346,19 @@ COMPOSITOR.event.onInitialConfigure((window) => {
   HYBRID_WINDOW_MANAGER.onInitialConfigure(window);
 });
 
+/** plasmashell popups that slide out of their panel (KWin's sliding popups). */
+function slidesFromPanel(window: WaylandWindow): boolean {
+  const plasma = window.plasma.peek();
+  // Kickoff, the calendar, the tray popups, and the taskbar's grouped-window
+  // list (a positioned "normal" window).
+  return plasma?.role === "appletpopup" || plasma?.role === "normal";
+}
+
 COMPOSITOR.event.onFirstCommit((window) => {
   if (isPlasmaShellWindow(window)) {
+    if (slidesFromPanel(window)) {
+      slidePopupIn(window);
+    }
     return;
   }
   HYBRID_WINDOW_MANAGER.onFirstCommit(window);
@@ -1312,6 +1367,9 @@ COMPOSITOR.event.onFirstCommit((window) => {
 
 COMPOSITOR.event.onStartClose((window) => {
   if (isPlasmaShellWindow(window)) {
+    if (slidesFromPanel(window)) {
+      slidePopupOut(window);
+    }
     return;
   }
   HYBRID_WINDOW_MANAGER.onStartClose(window);
@@ -1797,13 +1855,14 @@ const TRAFFIC_LIGHT_SIZE = 12;
 const TITLEBAR_PADDING_X = 8;
 const TITLEBAR_GAP = 8;
 
-/** The window is the hovered card of the Window View. */
+/** The window is the hovered card of the Window View or the grid. */
 const isWindowViewCard = (window: WaylandWindow) =>
-  WINDOW_VIEW.selectedWindowId() === window.id;
+  WINDOW_VIEW.selectedWindowId() === window.id ||
+  WINDOW_GRID.selectedWindowId() === window.id;
 
-/** While the Window View is open, only its hovered card shows traffic lights. */
+/** While the Window View or the grid is open, only its hovered card shows traffic lights. */
 const trafficLightsShown = (window: WaylandWindow) =>
-  !WINDOW_VIEW.isOpen() || isWindowViewCard(window);
+  (!WINDOW_VIEW.isOpen() && !WINDOW_GRID.isOpen()) || isWindowViewCard(window);
 
 /**
  * The traffic light at `(x, y)`, logical px from the top-left corner of

@@ -6,7 +6,7 @@
 ## Files changed
 
 - `shojiwm/` (new):
-  - `patches/`: 33 ShojiWM commits on top of upstream `13c8eca`.
+  - `patches/`: 40 ShojiWM commits on top of upstream `13c8eca`.
   - `config/`: a snapshot of the ShojiWM config.
   - `lockscreen/hyprlock.conf`
   - `install.sh`
@@ -25,6 +25,15 @@ Spectacle could not capture.
 ## Intended behaviour
 
 ShojiWM is a second login session with the same KDE look. See `shojiwm/README.md`.
+
+## Later the same day (21:41 UTC)
+
+- Coverflow opens on the current window, zooms out, then steps to the next card.
+- Window View and the new Super+Tab grid lay windows out as balanced rows and columns (5 windows: 3 + 2).
+- The grid's hovered card shows the traffic lights: close, minimize, maximize.
+- Kickoff, the calendar and the tray popups slide out of the panel, KWin style (150 ms, OutQuint in, InCubic out).
+- plasmashell gets `KDE_FULL_SESSION=true` and `KDE_SESSION_VERSION=6`.
+- The patches are now 40 commits (tree `cdbdee4`).
 
 ## Workspace circles widget
 

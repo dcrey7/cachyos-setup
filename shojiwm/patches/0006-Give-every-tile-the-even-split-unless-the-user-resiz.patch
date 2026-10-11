@@ -1,7 +1,7 @@
 From 0cec726e2b2b5f868d3bdd01ea3fa77a42838a9f Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 15:54:55 +0200
-Subject: [PATCH 06/33] Give every tile the even split unless the user resized
+Subject: [PATCH 06/40] Give every tile the even split unless the user resized
  it by hand
 
 ---

@@ -1,7 +1,7 @@
 From 309d71919de8283228553df38f499d6d38748ae3 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 17:31:51 +0200
-Subject: [PATCH 13/33] Use the Breeze cursor and let Alt release pick in the
+Subject: [PATCH 13/40] Use the Breeze cursor and let Alt release pick in the
  switcher
 
 The author's Bibata cursor theme is not installed here, so the cursor

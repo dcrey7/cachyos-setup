@@ -1,7 +1,7 @@
 From af78f4cece33887357ac694a0baabff373d8b91f Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 23:19:59 +0200
-Subject: [PATCH 33/33] Switchers: close to where the window manager puts the
+Subject: [PATCH 33/40] Switchers: close to where the window manager puts the
  windows
 
 Picking a window in a scrolling workspace pans it at once, but

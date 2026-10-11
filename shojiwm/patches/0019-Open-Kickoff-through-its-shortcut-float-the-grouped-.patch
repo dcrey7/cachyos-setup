@@ -1,7 +1,7 @@
 From 6d54935655850f919a9403285bb2c6386c3b34ff Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 18:29:51 +0200
-Subject: [PATCH 19/33] Open Kickoff through its shortcut, float the
+Subject: [PATCH 19/40] Open Kickoff through its shortcut, float the
  grouped-window list, shadow plasma popups
 
 - Super now fires Kickoff's own kglobalaccel shortcut. activateLauncherMenu

@@ -1,7 +1,7 @@
 From 237f1619938154eb644b54dce4fb9afd22e59778 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 22:10:20 +0200
-Subject: [PATCH 27/33] Offer xdg_toplevel_tag_manager_v1 so Spectacle's region
+Subject: [PATCH 27/40] Offer xdg_toplevel_tag_manager_v1 so Spectacle's region
  mode starts
 
 KWindowSystem 6.30 sets toplevel tags without checking that the compositor

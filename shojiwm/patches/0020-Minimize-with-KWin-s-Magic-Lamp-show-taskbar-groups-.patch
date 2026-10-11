@@ -1,7 +1,7 @@
 From 306523c2672a26b80a8205787e75c023b39f4538 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 18:58:37 +0200
-Subject: [PATCH 20/33] Minimize with KWin's Magic Lamp, show taskbar groups in
+Subject: [PATCH 20/40] Minimize with KWin's Magic Lamp, show taskbar groups in
  a Window View
 
 Magic Lamp: a port of KWin's magiclamp effect. A minimizing window

@@ -1,7 +1,7 @@
 From c2868c3d80a11673c49724076647cc22438b6eef Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 15:43:04 +0200
-Subject: [PATCH 03/33] Replace the gold focus border with a faint white
+Subject: [PATCH 03/40] Replace the gold focus border with a faint white
  hairline
 
 ---

@@ -1,7 +1,7 @@
 From cfb337f8fc58f172eaacc06df4170a0d7037cf16 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 22:31:12 +0200
-Subject: [PATCH 30/33] Jump to workspace N with Ctrl+FN, Super+FN and Super+N
+Subject: [PATCH 30/40] Jump to workspace N with Ctrl+FN, Super+FN and Super+N
 
 ---
  packages/config/src/index.tsx | 24 ++++++++++++++++++++++++
