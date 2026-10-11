@@ -1,0 +1,1516 @@
+From 306523c2672a26b80a8205787e75c023b39f4538 Mon Sep 17 00:00:00 2001
+From: Abhishek <abhishek01789@gmail.com>
+Date: Sun, 11 Oct 2026 18:58:37 +0200
+Subject: [PATCH 20/41] Minimize with KWin's Magic Lamp, show taskbar groups in
+ a Window View
+
+Magic Lamp: a port of KWin's magiclamp effect. A minimizing window
+pours into its taskbar entry, and pours back out on restore. The
+shader inverts KWin's per-side formulas per pixel. Duration is KWin's
+700 ms times the 0.25 animation factor of this machine.
+
+The compositor now stores org_kde_plasma_window.set_minimized_geometry
+in global coordinates and exposes it as window.minimizedGeometry.
+Without one, the lamp aims at the cursor, like KWin.
+
+Window View: a helper owns org.kde.KWin.Effect.WindowView1 on the
+session bus, so the taskbar shows a group's windows side by side
+instead of a text list. It passes the window ids to the config, which
+opens the window grid with only those windows, styled like KWin.
+---
+ packages/config/src/effect/magic-lamp.frag    | 109 ++++++
+ .../config/src/helpers/window-view-dbus.py    |  89 +++++
+ packages/config/src/index.tsx                 | 134 ++++++-
+ packages/config/src/magic-lamp.ts             | 352 ++++++++++++++++++
+ packages/config/src/window-grid.tsx           |  38 ++
+ packages/config/src/window-manager.ts         |  37 +-
+ packages/config/src/window-switcher.tsx       |  61 ++-
+ packages/shoji_wm/src/reactive-window.ts      |  11 +
+ packages/shoji_wm/src/types.ts                |   9 +
+ src/shojiwm/src/evaluator.rs                  |   1 +
+ src/shojiwm/src/lib.rs                        |   2 +
+ .../src/plasma_window_management.rs           |  97 ++++-
+ src/shojiwm_lib/src/ssd/window_model.rs       |   8 +
+ src/shojiwm_lib/src/state.rs                  |   1 +
+ .../examples/default_config/main.rs           |   1 +
+ src/shojiwm_rs/src/window.rs                  |   1 +
+ src/shojiwm_rs/tests/reactive_runtime.rs      |   1 +
+ 17 files changed, 901 insertions(+), 51 deletions(-)
+ create mode 100644 packages/config/src/effect/magic-lamp.frag
+ create mode 100755 packages/config/src/helpers/window-view-dbus.py
+ create mode 100644 packages/config/src/magic-lamp.ts
+
+diff --git a/packages/config/src/effect/magic-lamp.frag b/packages/config/src/effect/magic-lamp.frag
+new file mode 100644
+index 0000000..746483b
+--- /dev/null
++++ b/packages/config/src/effect/magic-lamp.frag
+@@ -0,0 +1,109 @@
++// Magic Lamp, ported from KWin (kwin/src/plugins/magiclamp/magiclamp.cpp).
++//
++// KWin cuts the window into a 40x40 grid and moves every grid point towards
++// the taskbar entry ("icon"). Here every screen pixel looks for the window
++// pixel that KWin's formulas move onto it:
++//
++// - along the motion axis (y for an icon above or below the window, x for
++//   one at the side) KWin's formula only grows, so a binary search finds the
++//   source line;
++// - across, KWin pulls the line towards the icon by a factor, which is
++//   linear, so it is solved directly.
++//
++// All lengths are logical px, relative to the window frame's top-left.
++uniform vec4 icon;    // the icon: x, y, width, height
++uniform vec4 params;  // progress (0 = window, 1 = in the icon), side, shadow margin, unused
++
++const float SIDE_TOP = 0.0;
++const float SIDE_BOTTOM = 1.0;
++const float SIDE_LEFT = 2.0;
++const float SIDE_RIGHT = 3.0;
++
++float cube(float v) {
++    return v * v * v;
++}
++
++// KWin's p_progress: |min(offset / distance, 1)|, without the 0 / 0.
++float turn(float offset, float distance) {
++    if (abs(distance) < 1e-6) {
++        return offset == 0.0 ? 0.0 : 1.0;
++    }
++    return abs(min(offset / distance, 1.0));
++}
++
++// One line of the window, moved: x = where the line lands, y = KWin's
++// p_progress (how far the line has turned towards the icon).
++//
++// `s` is the line's place on the motion axis, `len` the window's length on
++// it, `icon_start` and `icon_size` the icon's place and size on it.
++// `towards_end` is true for an icon below or right of the window (KWin's
++// Bottom and Right branches), false for Top and Left.
++vec2 move_line(float s, float len, float icon_start, float icon_size, bool towards_end, float p) {
++    if (towards_end) {
++        // KWin's Bottom / Right.
++        float factor = s + (len - s) * p;
++        float offset = (icon_start + s) * p * cube(factor) / cube(len);
++        float landed = min(icon_start, s + offset);
++        float pp = turn(offset, icon_start - s);
++        return vec2(landed, pp);
++    }
++    // KWin's Top / Left.
++    float icon_end = icon_start + icon_size;
++    float factor = len - s + s * p;
++    float offset = (len - icon_end + s) * p * cube(factor) / cube(len);
++    float landed = max(icon_end, s - offset);
++    float pp = turn(offset, s - icon_end);
++    return vec2(landed, pp);
++}
++
++vec4 shader_main(EffectContext effect) {
++    float p = params.x;
++    float side = params.y;
++    float margin = params.z;
++    vec2 size = effect.frame_rect_phy_px.zw / effect.scale;
++    vec2 here = effect_frame_phy_px(effect) / effect.scale;
++    if (p <= 0.0) {
++        return texture2D(tex, effect.texture_uv);
++    }
++
++    // Work on (motion axis, cross axis).
++    bool vertical = side < 1.5;
++    vec2 target = vertical ? here.yx : here;
++    vec2 len = vertical ? size.yx : size;
++    vec4 box = vertical ? icon.yxwz : icon; // start, cross start, size, cross size
++    bool towards_end = side == SIDE_BOTTOM || side == SIDE_RIGHT;
++
++    // KWin moves the window's shadow with it: search a little past the frame.
++    float lo = -margin;
++    float hi = len.x + margin;
++    float first = move_line(lo, len.x, box.x, box.z, towards_end, p).x;
++    float last = move_line(hi, len.x, box.x, box.z, towards_end, p).x;
++    if (target.x < first || target.x > last) {
++        return vec4(0.0);
++    }
++    // The landing place only grows with s: bisect for the line on this pixel.
++    for (int i = 0; i < 18; i++) {
++        float mid = 0.5 * (lo + hi);
++        if (move_line(mid, len.x, box.x, box.z, towards_end, p).x < target.x) {
++            lo = mid;
++        } else {
++            hi = mid;
++        }
++    }
++    float s = 0.5 * (lo + hi);
++    float pp = move_line(s, len.x, box.x, box.z, towards_end, p).y;
++
++    // Across: landed = c + (box.y + box.w * c / len.y - c) * pp. Solve for c.
++    float stretch = 1.0 - pp + pp * box.w / len.y;
++    if (stretch < 1e-4) {
++        return vec4(0.0);
++    }
++    float c = (target.y - pp * box.y) / stretch;
++
++    vec2 source = vertical ? vec2(c, s) : vec2(s, c);
++    vec2 uv = (effect.frame_rect_phy_px.xy + source * effect.scale) / effect.texture_size_phy_px;
++    if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) {
++        return vec4(0.0);
++    }
++    return texture2D(tex, uv);
++}
+diff --git a/packages/config/src/helpers/window-view-dbus.py b/packages/config/src/helpers/window-view-dbus.py
+new file mode 100755
+index 0000000..d4c0678
+--- /dev/null
++++ b/packages/config/src/helpers/window-view-dbus.py
+@@ -0,0 +1,89 @@
++#!/usr/bin/env python3
++"""KWin's Window View D-Bus service, for plasmashell's taskbar.
++
++The taskbar setting "Clicking grouped task: Show windows side by side" calls
++org.kde.KWin.Effect.WindowView1.activate(as) with the windows' ids. It only
++offers that while some program owns the bus name; with no owner it falls
++back to the textual list of windows.
++
++This service owns the name and passes the ids on to the ShojiWM config over
++its IPC socket (the `windowView.activate` command), which opens the window
++view. The ids are the org_kde_plasma_window_management uuids, which are the
++ShojiWM window ids.
++
++    taskbar ──activate([ids])──> this service ──IPC──> config: window view
++
++Usage: window-view-dbus.py [IPC socket path]
++"""
++
++import json
++import os
++import socket
++import sys
++
++from gi.repository import Gio, GLib
++
++BUS_NAME = "org.kde.KWin.Effect.WindowView1"
++OBJECT_PATH = "/org/kde/KWin/Effect/WindowView1"
++INTERFACE_XML = """
++<node>
++  <interface name="org.kde.KWin.Effect.WindowView1">
++    <method name="activate">
++      <arg name="handles" type="as" direction="in"/>
++    </method>
++  </interface>
++</node>
++"""
++
++
++def default_socket_path() -> str:
++    """The same path as `defaultSocketPath()` in shoji_wm/ipc."""
++    runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
++    display = os.environ.get("WAYLAND_DISPLAY", "wayland-0")
++    return f"{runtime_dir}/shojiwm-{display}.sock"
++
++
++SOCKET_PATH = sys.argv[1] if len(sys.argv) > 1 else default_socket_path()
++
++
++def send_to_config(window_ids: list[str]) -> None:
++    """Send one fire-and-forget IPC command (no "id", so no reply)."""
++    message = {"method": "windowView.activate", "params": {"windowIds": window_ids}}
++    try:
++        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
++            connection.connect(SOCKET_PATH)
++            connection.sendall((json.dumps(message) + "\n").encode())
++    except OSError as error:
++        print(f"window-view-dbus: cannot reach {SOCKET_PATH}: {error}", file=sys.stderr)
++
++
++def on_method_call(_connection, _sender, _path, _interface, method, parameters, invocation):
++    if method == "activate":
++        (window_ids,) = parameters.unpack()
++        send_to_config(list(window_ids))
++        invocation.return_value(None)
++    else:
++        invocation.return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", method)
++
++
++def on_bus_acquired(connection, _name):
++    # Register the object before the name shows up, so the taskbar never sees
++    # the name without the object.
++    interface = Gio.DBusNodeInfo.new_for_xml(INTERFACE_XML).interfaces[0]
++    connection.register_object(OBJECT_PATH, interface, on_method_call, None, None)
++
++
++def on_name_lost(_connection, _name):
++    print(f"window-view-dbus: {BUS_NAME} is taken (is KWin running?)", file=sys.stderr)
++    sys.exit(1)
++
++
++Gio.bus_own_name(
++    Gio.BusType.SESSION,
++    BUS_NAME,
++    Gio.BusNameOwnerFlags.NONE,
++    on_bus_acquired,
++    None,
++    on_name_lost,
++)
++GLib.MainLoop().run()
+diff --git a/packages/config/src/index.tsx b/packages/config/src/index.tsx
+index e8c7f96..06c353a 100644
+--- a/packages/config/src/index.tsx
++++ b/packages/config/src/index.tsx
+@@ -29,9 +29,10 @@ import {
+   Popup,
+   type ReadonlySignal,
+   DefaultComposition,
++  Windows,
+ } from "shoji_wm";
+ import type { CompositionRenderable, ManagedWindowRect } from "shoji_wm/types";
+-import { createIpcServer } from "shoji_wm/ipc";
++import { createIpcServer, defaultSocketPath } from "shoji_wm/ipc";
+ import {
+   HybridWindowManager,
+   TITLEBAR_HEIGHT,
+@@ -51,12 +52,17 @@ import {
+ } from "./window-manager";
+ import { ISLAND_GLASS } from "./effect/island-glass";
+ import { createFlip3D } from "./flip-3d";
+-import { createWindowGrid } from "./window-grid";
++import { createWindowGrid, createWindowView } from "./window-grid";
+ import {
+   jellyDragEffect,
+   jellyDragForget,
+   jellyDragOnWindowMove,
+ } from "./jelly-drag";
++import {
++  configureMagicLamp,
++  magicLampEffect,
++  magicLampForget,
++} from "./magic-lamp";
+ 
+ COMPOSITOR.env.apply({
+   QT_QPA_PLATFORM: "wayland;xcb",
+@@ -109,6 +115,16 @@ function isPlasmaShellWindow(window: WaylandWindow): boolean {
+   return isPlasmaShellSurface(window.plasma.peek());
+ }
+ 
++/** plasmashell's open windows, by id (filled by the open and close events). */
++const PLASMA_SHELL_WINDOWS = new Map<string, WaylandWindow>();
++
++/** plasmashell's open windows with this role (e.g. the panels, the desktop). */
++function plasmaShellWindows(role: PlasmaSurfaceRole): WaylandWindow[] {
++  return [...PLASMA_SHELL_WINDOWS.values()].filter(
++    (window) => window.plasma.peek()?.role === role,
++  );
++}
++
+ /** Shell windows that need the keyboard as soon as they open. */
+ function plasmaShellWindowTakesFocus(window: WaylandWindow): boolean {
+   const plasma = window.plasma.peek();
+@@ -138,14 +154,40 @@ const WINDOW_SWITCHER = (
+       ? FULLSCREEN_Z_INDEX
+       : windowZIndex(window),
+ });
++// KDE's Window View: the taskbar's "show windows side by side" for a group
++// of windows (see the `windowView.activate` IPC command).
++const WINDOW_VIEW = createWindowView({
++  windowManager: HYBRID_WINDOW_MANAGER,
++  stackOrder: (window) =>
++    window.state[WINDOW_STATE_FULLSCREEN]()
++      ? FULLSCREEN_Z_INDEX
++      : windowZIndex(window),
++  // The KDE wallpaper is a plasmashell window, not a layer. The panels hide,
++  // as in KWin.
++  backdrop: () => <Windows windows={plasmaShellWindows("desktop")} />,
++});
+ COMPOSITOR.rendering.composition = (output) =>
+-  WINDOW_SWITCHER.compose(output) ?? <DefaultComposition />;
++  WINDOW_SWITCHER.compose(output) ??
++  WINDOW_VIEW.compose(output) ?? <DefaultComposition />;
++
++/** What both switchers share with the rest of the config. */
++const SWITCHERS = {
++  blurSuspended: computed(
++    () => WINDOW_SWITCHER.blurSuspended() || WINDOW_VIEW.blurSuspended(),
++  ),
++  backdropStrength: computed(() =>
++    Math.min(WINDOW_SWITCHER.backdropStrength(), WINDOW_VIEW.backdropStrength()),
++  ),
++  selectedWindowId: computed(
++    () => WINDOW_SWITCHER.selectedWindowId() ?? WINDOW_VIEW.selectedWindowId(),
++  ),
++};
+ 
+ // Window backdrop effects end with this stage so they can fade back in after
+ // the switcher closes.
+ const backdropFade = () =>
+   shaderStage(loadShader("./src/effect/backdrop-fade.frag"), {
+-    uniforms: { strength: WINDOW_SWITCHER.backdropStrength },
++    uniforms: { strength: SWITCHERS.backdropStrength },
+   });
+ const HOT_RELOAD_WINDOW_MANAGER_STATE = "config.hybrid-window-manager";
+ const FULLSCREEN_Z_INDEX = 2_000_000_000;
+@@ -200,6 +242,9 @@ COMPOSITOR.onEnable((event) => {
+ //   workspaces.toggleTiling  { monitor?: string }                  (command)
+ //   workspaces.changed       -> WorkspacesView                     (broadcast)
+ //   windows.activate         { windowId: string }                  (command)
++//   windows.minimize         { windowId: string }                  (command)
++//   windowView.activate      { windowIds: string[] }               (command)
++//   windowView.deactivate                                          (command)
+ //   dock.proximity           { monitor: string, inside: bool }    (broadcast)
+ // ---------------------------------------------------------------------------
+ const WORKSPACE_IPC = createIpcServer();
+@@ -295,6 +340,30 @@ WORKSPACE_IPC.handle("windows.activate", (params) => {
+   }
+ });
+ 
++WORKSPACE_IPC.handle("windows.minimize", (params) => {
++  const windowId = (params as { windowId?: string } | undefined)?.windowId;
++  if (typeof windowId === "string") {
++    HYBRID_WINDOW_MANAGER.findWindowById(windowId)?.minimize();
++  }
++});
++
++// KDE's Window View for a taskbar group ("show windows side by side"):
++// plasmashell calls org.kde.KWin.Effect.WindowView1.activate with the
++// windows' ids, and ./helpers/window-view-dbus.py hands them on to here.
++WORKSPACE_IPC.handle("windowView.activate", (params) => {
++  const ids = (params as { windowIds?: unknown } | undefined)?.windowIds;
++  if (!Array.isArray(ids) || SWITCHERS.blurSuspended.peek()) {
++    // Bad call, or a switcher is already open.
++    return;
++  }
++  const windows = ids
++    .map((id) => HYBRID_WINDOW_MANAGER.findWindowById(String(id)))
++    .filter((window) => window !== undefined);
++  WINDOW_VIEW.open(HYBRID_WINDOW_MANAGER.getCurrentMonitorName(), windows);
++});
++
++WORKSPACE_IPC.handle("windowView.deactivate", () => WINDOW_VIEW.cancel());
++
+ // ---------------------------------------------------------------------------
+ // Dock proximity: watch the pointer and broadcast enter/leave for the bottom
+ // strip of each monitor. The bar uses this in place of a layer-shell trigger
+@@ -426,6 +495,18 @@ if (!INSIDE_KDE) {
+     env: { XDG_CURRENT_DESKTOP: "KDE", XDG_MENU_PREFIX: "plasma-" },
+     restart: "on-exit",
+   });
++  // Owns KWin's Window View D-Bus name, so the taskbar shows a group's
++  // windows side by side instead of a text list (see the helper's header).
++  COMPOSITOR.process.service("window-view-dbus", {
++    command: [
++      "sh",
++      "-c",
++      'exec python3 "$HOME/.config/shojiwm/src/helpers/window-view-dbus.py" "$1"',
++      "window-view-dbus",
++      defaultSocketPath(),
++    ],
++    restart: "on-exit",
++  });
+   // The KDE window that asks for your password when an app needs admin rights.
+   COMPOSITOR.process.service("polkit-agent", {
+     command: ["/usr/lib/polkit-kde-authentication-agent-1"],
+@@ -833,7 +914,7 @@ const BACKGROUND_BLUR = compileEffect({
+   pipeline: [dualKawaseBlur({ radius: 4, passes: 2 }), backdropFade()],
+ });
+ COMPOSITOR.effect.background_effect = computed(() =>
+-  WINDOW_SWITCHER.blurSuspended() ? null : BACKGROUND_BLUR,
++  SWITCHERS.blurSuspended() ? null : BACKGROUND_BLUR,
+ );
+ 
+ const LAYER_BLUR_MASK = compileLayerEffect({
+@@ -862,9 +943,39 @@ const LAYER_BLUR_MASK = compileLayerEffect({
+ // Set to false to turn it off. It shows only in a real session, not in the
+ // preview inside KDE.
+ const JELLY_DRAG = true;
+-if (JELLY_DRAG) {
+-  COMPOSITOR.effect.window = jellyDragEffect;
+-}
++// Magic Lamp (KDE's minimize effect, ./magic-lamp.ts): a minimizing window
++// pours into its taskbar entry. It wins over the jelly drag while it runs.
++configureMagicLamp({
++  // KWin's "docks": plasma panels (windows or layer-shell surfaces) and any
++  // other bar.
++  panels: () => [
++    ...plasmaShellWindows("panel").map((window) => ({
++      x: window.rect.x,
++      y: window.rect.y,
++      width: window.rect.width,
++      height: window.rect.height,
++    })),
++    ...Object.values(COMPOSITOR.layer.current)
++      .filter((layer) => layer.layer !== "background")
++      .flatMap((layer) => {
++        const output = COMPOSITOR.output.get(layer.outputName);
++        if (!output) {
++          return [];
++        }
++        // Layer positions are output-local.
++        return [
++          {
++            x: output.position.x + layer.position.x,
++            y: output.position.y + layer.position.y,
++            width: layer.position.width,
++            height: layer.position.height,
++          },
++        ];
++      }),
++  ],
++});
++COMPOSITOR.effect.window = (window) =>
++  magicLampEffect(window) ?? (JELLY_DRAG ? jellyDragEffect(window) : null);
+ 
+ COMPOSITOR.effect.layer = (layer) => {
+   const namespace = layer.namespace();
+@@ -953,6 +1064,7 @@ COMPOSITOR.rendering.surfacePolicy = (surface) => {
+ // below (see `isPlasmaShellWindow`).
+ COMPOSITOR.event.onOpen((window) => {
+   if (isPlasmaShellWindow(window)) {
++    PLASMA_SHELL_WINDOWS.set(window.id, window);
+     if (plasmaShellWindowTakesFocus(window)) {
+       window.focus();
+     }
+@@ -985,6 +1097,7 @@ COMPOSITOR.event.onStartClose((window) => {
+ });
+ 
+ COMPOSITOR.event.onClose((window) => {
++  PLASMA_SHELL_WINDOWS.delete(window.id);
+   if (isPlasmaShellWindow(window)) {
+     // A focused popup can close before it reports the focus loss.
+     if (window.isFocused.peek()) {
+@@ -994,6 +1107,7 @@ COMPOSITOR.event.onClose((window) => {
+   }
+   HYBRID_WINDOW_MANAGER.onClose(window);
+   jellyDragForget(window);
++  magicLampForget(window);
+   scheduleWorkspaceBroadcast();
+ });
+ 
+@@ -1216,7 +1330,7 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
+   // The window selected in the window switcher glows white instead (it fits
+   // in the switcher's texture margin).
+   const windowShadow = computed(() =>
+-    WINDOW_SWITCHER.selectedWindowId() === window.id
++    SWITCHERS.selectedWindowId() === window.id
+       ? [{ blur: 28, spread: 4, color: "#ffffffd0" }]
+       : window.isFocused()
+         ? [{ y: 10, blur: 32, spread: -2, color: "#00000090" }]
+@@ -1280,7 +1394,7 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
+   });
+   // No backdrop effects while the window switcher shows the windows as
+   // textures: there is nothing under a window there to blur.
+-  const blurSuspended = WINDOW_SWITCHER.blurSuspended();
++  const blurSuspended = SWITCHERS.blurSuspended();
+ 
+   const appIcon = (
+     <AppIcon icon={window.icon} style={{ width: 16, height: 16 }} />
+diff --git a/packages/config/src/magic-lamp.ts b/packages/config/src/magic-lamp.ts
+new file mode 100644
+index 0000000..d5aa709
+--- /dev/null
++++ b/packages/config/src/magic-lamp.ts
+@@ -0,0 +1,352 @@
++import {
++  COMPOSITOR,
++  compileWindowEffect,
++  loadShader,
++  outputLogicalSize,
++  shaderStage,
++  signal,
++  windowSource,
++  type OutputInfo,
++  type PollHandle,
++  type WaylandWindow,
++} from "shoji_wm";
++import type {
++  EffectOutsets,
++  WindowEffectAssignment,
++  WindowEffectHandle,
++  WindowPosition,
++} from "shoji_wm/types";
++
++// Magic Lamp: a port of KWin's magiclamp effect
++// (kwin/src/plugins/magiclamp/magiclamp.cpp), with the KDE settings of this
++// machine.
++//
++// A window that minimizes pours into its taskbar entry like a genie into
++// its lamp, and pours back out when it comes back. The taskbar entry comes
++// from KDE's `set_minimized_geometry` (`window.minimizedGeometry`). Without
++// one, the window pours towards the cursor, as in KWin.
++//
++//   progress 0 ──────────────> 1        (minimize, linear, KWin's timeline)
++//   window        bends         in the entry
++//   progress 1 ──────────────> 0        (restore: the same, backwards)
++//
++// The magic-lamp shader does the drawing. The effect exists only while a
++// window animates, so it costs nothing at rest.
++
++/**
++ * KWin's `animationTime(AnimationDuration)`: kwinrc [Effect-magiclamp]
++ * AnimationDuration=700 times kdeglobals AnimationDurationFactor=0.25 on this
++ * machine. KWin's default is 250 ms times the factor.
++ */
++const DURATION_MS = 700 * 0.25;
++/** Room for the window's shadow, which KWin bends with the window (logical px). */
++const SHADOW_MARGIN = 48;
++
++type Side = "top" | "bottom" | "left" | "right";
++const SIDE_INDEX: Record<Side, number> = { top: 0, bottom: 1, left: 2, right: 3 };
++
++type NumberSignal = ReturnType<typeof signal<number>>;
++
++interface Lamp {
++  window: WaylandWindow;
++  active: ReturnType<typeof signal<boolean>>;
++  /** How far the effect may draw past the window: from the window to the icon. */
++  outsets: ReturnType<typeof signal<EffectOutsets>>;
++  /** The icon relative to the window frame: x, y, width, height. */
++  icon: NumberSignal[];
++  progressSignal: NumberSignal;
++  sideSignal: NumberSignal;
++  effect: WindowEffectHandle;
++  /** 0 = the window, 1 = in the icon. */
++  progress: number;
++  /** true: towards the icon (minimize), false: out of it (restore). */
++  forward: boolean;
++  /** The icon in global logical px, fixed when the animation starts (like KWin per frame). */
++  target: WindowPosition;
++  side: Side;
++  poll: PollHandle | null;
++  lastMs: number | null;
++}
++
++const lamps = new Map<string, Lamp>();
++
++/** The plasma panels' rects (KWin looks for the dock that holds the icon). */
++let panelRects: () => readonly WindowPosition[] = () => [];
++
++export function configureMagicLamp(options: { panels: () => readonly WindowPosition[] }) {
++  panelRects = options.panels;
++}
++
++function lampFor(window: WaylandWindow): Lamp {
++  let lamp = lamps.get(window.id);
++  if (lamp) {
++    return lamp;
++  }
++  const icon = [signal(0), signal(0), signal(0), signal(0)];
++  const progressSignal = signal(0);
++  const sideSignal = signal(0);
++  const margin = signal(SHADOW_MARGIN);
++  lamp = {
++    window,
++    active: signal(false),
++    outsets: signal<EffectOutsets>(SHADOW_MARGIN),
++    icon,
++    progressSignal,
++    sideSignal,
++    effect: compileWindowEffect({
++      input: windowSource(),
++      outsets: SHADOW_MARGIN,
++      alpha: "preserve",
++      invalidate: { kind: "always" },
++      pipeline: [
++        shaderStage(loadShader("./src/effect/magic-lamp.frag"), {
++          uniforms: {
++            icon: [icon[0], icon[1], icon[2], icon[3]],
++            params: [progressSignal, sideSignal, margin, margin],
++          },
++        }),
++      ],
++    }),
++    progress: 0,
++    forward: true,
++    target: { x: 0, y: 0, width: 0, height: 0 },
++    side: "bottom",
++    poll: null,
++    lastMs: null,
++  };
++  lamps.set(window.id, lamp);
++  return lamp;
++}
++
++function contains(rect: WindowPosition, x: number, y: number) {
++  return x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height;
++}
++
++function intersects(a: WindowPosition, b: WindowPosition) {
++  // Qt's QRect::intersects: an empty rect intersects nothing.
++  if (a.width <= 0 || a.height <= 0 || b.width <= 0 || b.height <= 0) {
++    return false;
++  }
++  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
++}
++
++function outputRect(output: OutputInfo | undefined): WindowPosition | null {
++  if (!output) {
++    return null;
++  }
++  const size = outputLogicalSize(output);
++  return { x: output.position.x, y: output.position.y, width: size.width, height: size.height };
++}
++
++function screenOf(window: WaylandWindow): WindowPosition | null {
++  const name = window.output.peek();
++  const output = name ? COMPOSITOR.output.get(name) : undefined;
++  return outputRect(output) ?? screenAt(window.rect.x, window.rect.y);
++}
++
++function screenAt(x: number, y: number): WindowPosition | null {
++  return outputRect(
++    COMPOSITOR.output.find((output) => {
++      const rect = outputRect(output);
++      return rect !== null && contains(rect, x, y);
++    }),
++  );
++}
++
++/** KWin's choice of icon and side (MagicLampEffect::apply, top half). */
++function pickTarget(window: WaylandWindow): { icon: WindowPosition; side: Side } {
++  const geo = window.rect;
++  const right = geo.x + geo.width - 1; // QRect::right()
++  const bottom = geo.y + geo.height - 1; // QRect::bottom()
++  // A ShojiWM installed before `minimizedGeometry` existed lacks the signal.
++  const geometrySignal = window.minimizedGeometry as typeof window.minimizedGeometry | undefined;
++  const icon = geometrySignal?.peek();
++
++  if (!geometrySignal) {
++    const guess = taskbarGuess(window);
++    if (guess) {
++      return guess;
++    }
++  }
++
++  if (!icon || icon.width <= 0 || icon.height <= 0) {
++    // No taskbar entry: the cursor, as an empty icon.
++    const cursor = COMPOSITOR.cursor.getPosition();
++    let x = Math.round(cursor?.x ?? geo.x + geo.width / 2);
++    let y = Math.round(cursor?.y ?? bottom);
++    let side: Side = "top";
++    if (contains(geo, x, y)) {
++      // Inside the window: go to the nearest border, Top first on ties.
++      let best = y - geo.y;
++      if (x - geo.x < best) {
++        best = x - geo.x;
++        side = "left";
++      }
++      if (bottom - y < best) {
++        best = bottom - y;
++        side = "bottom";
++      }
++      if (right - x < best) {
++        side = "right";
++      }
++      if (side === "top") y = geo.y;
++      if (side === "left") x = geo.x;
++      if (side === "bottom") y = bottom;
++      if (side === "right") x = right;
++    } else if (y < geo.y) {
++      side = "top";
++    } else if (x < geo.x) {
++      side = "left";
++    } else if (y > bottom) {
++      side = "bottom";
++    } else if (x > right) {
++      side = "right";
++    }
++    return { icon: { x, y, width: 0, height: 0 }, side };
++  }
++
++  // The panel that holds the icon decides the side.
++  const panel = panelRects().find((rect) => intersects(rect, icon));
++  if (panel) {
++    const screen = screenOf(window) ?? panel;
++    if (panel.width >= panel.height) {
++      const centerY = icon.y + icon.height / 2;
++      return { icon, side: centerY <= screen.y + screen.height / 2 ? "top" : "bottom" };
++    }
++    const centerX = icon.x + icon.width / 2;
++    return { icon, side: centerX <= screen.x + screen.width / 2 ? "left" : "right" };
++  }
++
++  // No panel (auto-hidden?): the screen edge the icon touches.
++  const screen = screenAt(icon.x, icon.y);
++  if (!screen) {
++    return { icon, side: "bottom" };
++  }
++  const left = Math.max(screen.x, icon.x);
++  const top = Math.max(screen.y, icon.y);
++  const rightEdge = Math.min(screen.x + screen.width, icon.x + icon.width);
++  let side: Side = "bottom";
++  if (left === screen.x) side = "left";
++  else if (rightEdge === screen.x + screen.width) side = "right";
++  else if (top === screen.y) side = "top";
++  return { icon, side };
++}
++
++/**
++ * Not KWin: a ShojiWM too old to know the taskbar entries still aims at the
++ * panel at the bottom of the window's screen. The cursor's x when the
++ * cursor is on that panel (a taskbar click), else the panel's middle.
++ */
++function taskbarGuess(window: WaylandWindow): { icon: WindowPosition; side: Side } | null {
++  const screen = screenOf(window);
++  if (!screen) {
++    return null;
++  }
++  const screenBottom = screen.y + screen.height;
++  const panel = panelRects().find(
++    (rect) =>
++      rect.width >= rect.height &&
++      rect.y + rect.height >= screenBottom - 1 &&
++      rect.x < screen.x + screen.width &&
++      screen.x < rect.x + rect.width,
++  );
++  if (!panel) {
++    return null;
++  }
++  const cursor = COMPOSITOR.cursor.getPosition();
++  const x =
++    cursor && contains(panel, cursor.x, cursor.y) ? cursor.x : panel.x + panel.width / 2;
++  return { icon: { x: Math.round(x), y: panel.y, width: 0, height: 0 }, side: "bottom" };
++}
++
++/** Send this frame's numbers to the shader. */
++function publish(lamp: Lamp) {
++  const geo = lamp.window.rect;
++  const icon = lamp.target;
++  lamp.icon[0][1](icon.x - geo.x);
++  lamp.icon[1][1](icon.y - geo.y);
++  lamp.icon[2][1](icon.width);
++  lamp.icon[3][1](icon.height);
++  lamp.progressSignal[1](lamp.progress);
++  lamp.sideSignal[1](SIDE_INDEX[lamp.side]);
++}
++
++/** Room around the window for the drawing: up to the icon, plus the shadow. */
++function outsetsFor(window: WaylandWindow, icon: WindowPosition): EffectOutsets {
++  const geo = window.rect;
++  return {
++    left: Math.ceil(Math.max(0, geo.x - icon.x) + SHADOW_MARGIN),
++    top: Math.ceil(Math.max(0, geo.y - icon.y) + SHADOW_MARGIN),
++    right: Math.ceil(Math.max(0, icon.x + icon.width - (geo.x + geo.width)) + SHADOW_MARGIN),
++    bottom: Math.ceil(Math.max(0, icon.y + icon.height - (geo.y + geo.height)) + SHADOW_MARGIN),
++  };
++}
++
++function stopLamp(lamp: Lamp) {
++  lamp.poll?.cancel();
++  lamp.poll = null;
++  lamp.active[1](false);
++}
++
++/**
++ * Start (or turn around) the animation for a minimize (`minimized` true) or
++ * a restore. Returns how long it runs, in ms.
++ */
++export function magicLampStart(window: WaylandWindow, minimized: boolean): number {
++  const lamp = lampFor(window);
++  if (!lamp.poll) {
++    // A fresh animation (KWin: a running one only turns around).
++    lamp.progress = minimized ? 0 : 1;
++    const { icon, side } = pickTarget(window);
++    lamp.target = icon;
++    lamp.side = side;
++  }
++  lamp.forward = minimized;
++  lamp.outsets[1](outsetsFor(window, lamp.target));
++  publish(lamp);
++  lamp.active[1](true);
++
++  if (!lamp.poll) {
++    lamp.lastMs = null;
++    lamp.poll = window.createPoll(
++      1,
++      (handle) => {
++        const delta = lamp.lastMs === null ? 0 : handle.nowMs - lamp.lastMs;
++        lamp.lastMs = handle.nowMs;
++        const step = delta / DURATION_MS;
++        lamp.progress = Math.min(1, Math.max(0, lamp.progress + (lamp.forward ? step : -step)));
++        publish(lamp);
++        if (lamp.forward ? lamp.progress >= 1 : lamp.progress <= 0) {
++          stopLamp(lamp);
++        }
++      },
++      { dirty: "none" },
++    );
++  }
++  const left = minimized ? 1 - lamp.progress : lamp.progress;
++  return Math.max(1, Math.round(left * DURATION_MS));
++}
++
++/** Drop the animation at once (instant minimize or restore). */
++export function magicLampStop(window: WaylandWindow) {
++  const lamp = lamps.get(window.id);
++  if (lamp) {
++    stopLamp(lamp);
++  }
++}
++
++/** The window effect: the lamp while the window minimizes or restores, else none. */
++export function magicLampEffect(window: WaylandWindow): WindowEffectAssignment | null {
++  // Always read the signals, so the effect turns on when an animation starts.
++  const lamp = lampFor(window);
++  if (!lamp.active()) {
++    return null;
++  }
++  return { replace: { ...lamp.effect, outsets: lamp.outsets() } };
++}
++
++/** Forget a closed window. */
++export function magicLampForget(window: WaylandWindow) {
++  lamps.get(window.id)?.poll?.cancel();
++  lamps.delete(window.id);
++}
+diff --git a/packages/config/src/window-grid.tsx b/packages/config/src/window-grid.tsx
+index cb0f000..7568cba 100644
+--- a/packages/config/src/window-grid.tsx
++++ b/packages/config/src/window-grid.tsx
+@@ -56,6 +56,28 @@ export function createWindowGrid(options: WindowSwitcherOptions): WindowSwitcher
+   return createWindowSwitcher(WINDOW_GRID_LAYOUT, options);
+ }
+ 
++/**
++ * KDE's Window View (KWin's windowview effect): the same grid for a chosen
++ * set of windows, opened with `open(output, windows)`. The taskbar opens it
++ * for a group of windows ("show windows side by side").
++ *
++ * Like KWin: the desktop dims to the Breeze Dark window colour at 75%, the
++ * view opens and closes with OutCubic easing, nothing is selected until the
++ * pointer or a key picks a window, and a click on empty space or `Escape`
++ * closes it.
++ */
++export function createWindowView(options: WindowSwitcherOptions): WindowSwitcher {
++  return createWindowSwitcher(WINDOW_VIEW_LAYOUT, options);
++}
++
++/** kdeglobals [Colors:Window] BackgroundNormal of Breeze Dark (32, 35, 38). */
++const BREEZE_DARK_WINDOW: readonly [number, number, number] = [32 / 255, 35 / 255, 38 / 255];
++/**
++ * KWin's `animationTime(300ms)`: 300 ms times kdeglobals
++ * AnimationDurationFactor=0.25 on this machine.
++ */
++const WINDOW_VIEW_MS = 300 * 0.25;
++
+ const WINDOW_GRID_LAYOUT: SwitcherLayout<GridState> = {
+   name: "window-grid",
+   dimAlpha: DIM_ALPHA,
+@@ -129,6 +151,22 @@ const WINDOW_GRID_LAYOUT: SwitcherLayout<GridState> = {
+   onClickOutside: (_state, controls) => controls.cancel(),
+ };
+ 
++const WINDOW_VIEW_LAYOUT: SwitcherLayout<GridState> = {
++  ...WINDOW_GRID_LAYOUT,
++  name: "window-view",
++  dimAlpha: 0.75,
++  dimColor: BREEZE_DARK_WINDOW,
++  transitionMs: WINDOW_VIEW_MS,
++  // Qt's Easing.OutCubic.
++  easing: (progress) => 1 - (1 - progress) ** 3,
++  startsWithoutSelection: true,
++  // KWin fades the panels out under the view.
++  hidesTopLayers: true,
++  initialSelection: () => 0,
++  // Opened by a click, not by a held key.
++  onSuperReleased: () => {},
++};
++
+ /** The window in the row above (`-1`) or below (`1`) nearest the selection. */
+ function neighbourRow(state: GridState, controls: SwitcherControls, direction: number): number | null {
+   const cells = state.cells;
+diff --git a/packages/config/src/window-manager.ts b/packages/config/src/window-manager.ts
+index 26ec1d2..524be19 100644
+--- a/packages/config/src/window-manager.ts
++++ b/packages/config/src/window-manager.ts
+@@ -26,6 +26,7 @@ import {
+ } from "shoji_wm";
+ import type { ManagedWindowRect, WindowSizeConstraints } from "shoji_wm/types";
+ import { playRectAnimation, stopRectAnimation } from "./window-animation";
++import { magicLampStart, magicLampStop } from "./magic-lamp";
+ 
+ export type SnapZone =
+   | "maximize"
+@@ -142,10 +143,6 @@ const WINDOW_OPEN_EASING = cubicBezier(0.1, 1.1, 0.1, 1.1);
+ const WINDOW_CLOSE_EASING = cubicBezier(0.3, -0.3, 0, 1);
+ /** Offset between floating windows that would otherwise open on the same spot. */
+ const FLOATING_CASCADE_STEP = 32;
+-const WINDOW_MINIMIZE_RECT_EASING = cubicBezier(0.3, -0.3, 0, 1);
+-const WINDOW_UNMINIMIZE_RECT_EASING = cubicBezier(0.1, 1.1, 0.1, 1.1);
+-const WINDOW_MINIMIZE_OPACITY_EASING = cubicBezier(0.3, -0.3, 0, 1);
+-const WINDOW_UNMINIMIZE_OPACITY_EASING = cubicBezier(0.1, 1.1, 0.1, 1.1);
+ export const TILE_ANIMATION_DURATION = seconds(0.5);
+ const WORKSPACE_SWITCH_ANIMATION_DURATION = seconds(0.5);
+ const WORKSPACE_GESTURE_FINGERS = 3;
+@@ -6116,9 +6113,10 @@ function scheduleMinimizeAnimation(
+   minimized: boolean,
+   instant = false,
+ ): void {
++  const rest = { x: 0, y: 0, width: 0, height: 0 };
+   if (instant) {
+     // Replace whatever the channel holds with its end pose.
+-    const rest = minimized ? { x: 0, y: 120, width: 0, height: 0 } : { x: 0, y: 0, width: 0, height: 0 };
++    magicLampStop(window);
+     const opacity = minimized ? 0 : 1;
+     window.scheduleAnimation({
+       channel: MINIMIZE_ANIMATION_CHANNEL,
+@@ -6127,30 +6125,15 @@ function scheduleMinimizeAnimation(
+     });
+     return;
+   }
++  // The Magic Lamp effect draws the window flowing into (or out of) its
++  // taskbar entry. This channel holds the window still and opaque meanwhile;
++  // a running animation also keeps a minimized (idle) window drawn until
++  // the lamp is done.
++  const duration = magicLampStart(window, minimized);
+   window.scheduleAnimation({
+     channel: MINIMIZE_ANIMATION_CHANNEL,
+-    rect: {
+-      from: minimized
+-        ? { x: 0, y: 0, width: 0, height: 0 }
+-        : { x: 0, y: 200, width: 0, height: 0 },
+-      to: minimized
+-        ? { x: 0, y: 120, width: 0, height: 0 }
+-        : { x: 0, y: 0, width: 0, height: 0 },
+-      duration: OPEN_CLOSE_ANIMATION_DURATION,
+-      easing: minimized
+-        ? WINDOW_MINIMIZE_RECT_EASING
+-        : WINDOW_UNMINIMIZE_RECT_EASING,
+-      mode: "add",
+-    },
+-    opacity: {
+-      from: minimized ? 1 : 0,
+-      to: minimized ? 0 : 1,
+-      duration: OPEN_CLOSE_ANIMATION_DURATION,
+-      easing: minimized
+-        ? WINDOW_MINIMIZE_OPACITY_EASING
+-        : WINDOW_UNMINIMIZE_OPACITY_EASING,
+-      mode: "override",
+-    },
++    rect: { from: rest, to: rest, duration, mode: "add" },
++    opacity: { from: 1, to: 1, duration, mode: "override" },
+   });
+ }
+ 
+diff --git a/packages/config/src/window-switcher.tsx b/packages/config/src/window-switcher.tsx
+index 20f49df..3b4a761 100644
+--- a/packages/config/src/window-switcher.tsx
++++ b/packages/config/src/window-switcher.tsx
+@@ -124,6 +124,16 @@ export interface SwitcherLayout<State> {
+   readonly name: string;
+   /** How far the desktop dims behind the windows. */
+   readonly dimAlpha: number;
++  /** The dimming colour, RGB 0..1 (default black). */
++  readonly dimColor?: readonly [number, number, number];
++  /** Opening and closing time in ms (default `TRANSITION_MS`). */
++  readonly transitionMs?: number;
++  /** Opening and closing easing (default the window manager's). */
++  readonly easing?: (progress: number) => number;
++  /** Open with no window selected; the pointer or a key selects one. */
++  readonly startsWithoutSelection?: boolean;
++  /** Hide the top and overlay layers (bars, panels) while open. */
++  readonly hidesTopLayers?: boolean;
+   /** Fresh per-session state. */
+   begin(windows: readonly WaylandWindow[], output: string): State;
+   /** The window selected on opening. */
+@@ -150,8 +160,13 @@ export interface SwitcherLayout<State> {
+ 
+ /** A window switcher, whatever its layout. */
+ export interface WindowSwitcher {
+-  /** Open the switcher on `output` (no-op while open). */
+-  open(output: string): void;
++  /**
++   * Open the switcher on `output` (no-op while open), with `windows` in that
++   * order, or every window by recent use.
++   */
++  open(output: string, windows?: readonly WaylandWindow[]): void;
++  /** Close it, back to the desktop unchanged (no-op while closed). */
++  cancel(): void;
+   /** The switcher's composition for `output` while open, else `null`. */
+   compose(output: OutputInfo): CompositionRenderable | null;
+   /** True while window backdrop effects should be off. */
+@@ -166,6 +181,8 @@ export interface WindowSwitcherOptions {
+   windowManager: HybridWindowManager;
+   /** A window's place in the real stack, higher on top (its decoration's zIndex). */
+   stackOrder: (window: WaylandWindow) => number;
++  /** Drawn over the background layers, under the dimming (e.g. a desktop window). */
++  backdrop?: (output: OutputInfo) => CompositionRenderable | null;
+ }
+ 
+ type Phase = "entering" | "shown" | "leaving";
+@@ -187,6 +204,8 @@ interface Session<State> {
+   phaseStartMs: number | null;
+   /** The selected window's index, unbounded (taken modulo the window count). */
+   selected: number;
++  /** False until something selects a window (`startsWithoutSelection`). */
++  hasSelection: boolean;
+   lastTickMs: number | null;
+   grab: InputGrab | null;
+   poll: PollHandle | null;
+@@ -199,6 +218,9 @@ export function createWindowSwitcher<State>(
+   options: WindowSwitcherOptions,
+ ): WindowSwitcher {
+   const wm = options.windowManager;
++  const easing = layout.easing ?? WINDOW_MANAGEMENT_EASING;
++  const transitionMs = layout.transitionMs ?? TRANSITION_MS;
++  const dimColor = layout.dimColor ?? [0, 0, 0];
+   const [current, setCurrent] = signal<Session<State> | null>(null);
+   // Bumped whenever the session's animated state changes, so the composition
+   // re-evaluates once per frame while something moves.
+@@ -226,7 +248,7 @@ export function createWindowSwitcher<State>(
+ 
+   /** Every window's pose for this frame. */
+   function poses(session: Session<State>, viewport: Viewport) {
+-    const eased = WINDOW_MANAGEMENT_EASING(session.progress);
++    const eased = easing(session.progress);
+     return session.windows.map((window, index) => {
+       const rect = rectOf(window);
+       const shown = layout.pose(session.state, index, rect, viewport, session.selected);
+@@ -247,7 +269,7 @@ export function createWindowSwitcher<State>(
+   }
+ 
+   function dimAlpha(session: Session<State>): number {
+-    const eased = WINDOW_MANAGEMENT_EASING(session.progress);
++    const eased = easing(session.progress);
+     switch (session.phase) {
+       case "entering":
+         return layout.dimAlpha * eased;
+@@ -284,7 +306,7 @@ export function createWindowSwitcher<State>(
+ 
+     if (session.phase !== "shown") {
+       session.phaseStartMs ??= nowMs;
+-      session.progress = Math.min(1, (nowMs - session.phaseStartMs) / TRANSITION_MS);
++      session.progress = Math.min(1, (nowMs - session.phaseStartMs) / transitionMs);
+     }
+     const moving = layout.tick?.(session.state, session.selected, dt) ?? false;
+ 
+@@ -330,12 +352,15 @@ export function createWindowSwitcher<State>(
+     });
+   }
+ 
+-  function open(outputName: string) {
++  function open(outputName: string, only?: readonly WaylandWindow[]) {
+     if (current.peek()) {
+       return;
+     }
+     const viewport = viewportOf(outputName);
+-    const windows = wm.listWindowsByRecentUse();
++    const alive = new Set(wm.listWindows().map((window) => window.id));
++    const windows = only
++      ? only.filter((window) => alive.has(window.id))
++      : wm.listWindowsByRecentUse();
+     if (!viewport || windows.length === 0) {
+       return;
+     }
+@@ -360,6 +385,7 @@ export function createWindowSwitcher<State>(
+       progress: 0,
+       phaseStartMs: null,
+       selected: layout.initialSelection(windows.length),
++      hasSelection: !layout.startsWithoutSelection,
+       lastTickMs: null,
+       grab: null,
+       poll: null,
+@@ -442,15 +468,23 @@ export function createWindowSwitcher<State>(
+   }
+ 
+   function select(session: Session<State>, index: number) {
+-    if (current.peek() !== session || session.phase === "leaving" || index === session.selected) {
++    if (
++      current.peek() !== session ||
++      session.phase === "leaving" ||
++      (session.hasSelection && index === session.selected)
++    ) {
+       return;
+     }
+     session.selected = index;
++    session.hasSelection = true;
+     setSelectedWindowId(selectedWindow(session)?.id ?? null);
+     ensureTicking(session);
+   }
+ 
+   function selectedWindow(session: Session<State>): WaylandWindow | undefined {
++    if (!session.hasSelection) {
++      return undefined;
++    }
+     return session.windows[mod(session.selected, session.windows.length)];
+   }
+ 
+@@ -591,7 +625,8 @@ export function createWindowSwitcher<State>(
+     return (
+       <>
+         <Layers layers={["background", "bottom"]} />
+-        <Solid color={[0, 0, 0, dimAlpha(session)]} />
++        {options.backdrop?.(output) ?? null}
++        <Solid color={[...dimColor, dimAlpha(session)]} />
+         <Scene3D camera={switcherCamera(width, height)}>
+           {planes.map(({ window, rect, pose, planeWidth, planeHeight, transform }) => (
+             <Plane
+@@ -603,7 +638,7 @@ export function createWindowSwitcher<State>(
+             />
+           ))}
+         </Scene3D>
+-        <Layers layers={["top", "overlay"]} />
++        {layout.hidesTopLayers ? null : <Layers layers={["top", "overlay"]} />}
+         <LayerPopups />
+       </>
+     );
+@@ -611,6 +646,12 @@ export function createWindowSwitcher<State>(
+ 
+   return {
+     open,
++    cancel: () => {
++      const session = current.peek();
++      if (session) {
++        close(session, null);
++      }
++    },
+     compose,
+     blurSuspended,
+     backdropStrength,
+diff --git a/packages/shoji_wm/src/reactive-window.ts b/packages/shoji_wm/src/reactive-window.ts
+index c7c5644..4a99dfe 100644
+--- a/packages/shoji_wm/src/reactive-window.ts
++++ b/packages/shoji_wm/src/reactive-window.ts
+@@ -41,6 +41,7 @@ interface MutableWindowSignals {
+   isTransient: Signal<boolean>;
+   parentId: Signal<string | undefined>;
+   plasma: Signal<PlasmaSurfaceState | undefined>;
++  minimizedGeometry: Signal<WindowPosition | undefined>;
+   icon: Signal<WindowIcon | undefined>;
+   interaction: Signal<WindowCompositionInteractionSnapshot>;
+   decoration: Signal<WindowDecorationState>;
+@@ -79,6 +80,7 @@ export function createReactiveWindow(
+     isTransient: signal(snapshot.isTransient),
+     parentId: signal(snapshot.parentId),
+     plasma: signal(snapshot.plasma),
++    minimizedGeometry: signal(snapshot.minimizedGeometry),
+     icon: signal(snapshot.icon),
+     interaction: signal(snapshot.interaction),
+     decoration: signal(snapshot.decoration),
+@@ -180,6 +182,7 @@ export function createReactiveWindow(
+     isTransient: signals.isTransient,
+     parentId: signals.parentId,
+     plasma: signals.plasma,
++    minimizedGeometry: signals.minimizedGeometry,
+     icon: signals.icon,
+     interaction: signals.interaction,
+     decoration: signals.decoration,
+@@ -252,6 +255,14 @@ export function createReactiveWindow(
+         if (!shallowEqual(signals.plasma.peek(), nextSnapshot.plasma)) {
+           signals.plasma.value = nextSnapshot.plasma;
+         }
++        if (
++          !shallowEqual(
++            signals.minimizedGeometry.peek(),
++            nextSnapshot.minimizedGeometry,
++          )
++        ) {
++          signals.minimizedGeometry.value = nextSnapshot.minimizedGeometry;
++        }
+         if (!shallowEqual(signals.icon.peek(), nextSnapshot.icon)) {
+           signals.icon.value = nextSnapshot.icon;
+         }
+diff --git a/packages/shoji_wm/src/types.ts b/packages/shoji_wm/src/types.ts
+index 847be97..5b07919 100644
+--- a/packages/shoji_wm/src/types.ts
++++ b/packages/shoji_wm/src/types.ts
+@@ -20,6 +20,8 @@ export interface WaylandWindowSnapshot {
+   readonly outputName?: string;
+   /** What plasmashell asked for this window; absent without a plasma surface. */
+   readonly plasma?: PlasmaSurfaceState;
++  /** The window's taskbar entry (global logical px), from KDE's `set_minimized_geometry`. */
++  readonly minimizedGeometry?: WindowPosition;
+ }
+ 
+ /** The `role` of KDE's `org_kde_plasma_surface.set_role`. */
+@@ -244,6 +246,12 @@ export interface WaylandWindow {
+    * `org_kde_plasma_surface`); `undefined` for every other window.
+    */
+   readonly plasma: import("./signals").ReadonlySignal<PlasmaSurfaceState | undefined>;
++  /**
++   * Where the taskbar shows this window (global logical px), from KDE's
++   * `org_kde_plasma_window.set_minimized_geometry`; `undefined` when no
++   * taskbar set one. The minimize animation flies the window there.
++   */
++  readonly minimizedGeometry: import("./signals").ReadonlySignal<WindowPosition | undefined>;
+   /** Window icon provided by the client or resolved from the desktop entry. / クライアントまたはデスクトップエントリから提供されるウィンドウアイコン。 */
+   readonly icon: import("./signals").ReadonlySignal<WindowIcon | undefined>;
+   /** Current pointer/drag interaction state for use in composition code. / 合成コードで使用するポインター・ドラッグの現在のインタラクション状態。 */
+@@ -3260,6 +3268,7 @@ export interface ReactiveWaylandWindowSignals {
+   isTransient: import("./signals").ReadonlySignal<boolean>;
+   parentId: import("./signals").ReadonlySignal<string | undefined>;
+   plasma: import("./signals").ReadonlySignal<PlasmaSurfaceState | undefined>;
++  minimizedGeometry: import("./signals").ReadonlySignal<WindowPosition | undefined>;
+   icon: import("./signals").ReadonlySignal<WindowIcon | undefined>;
+   interaction: import("./signals").ReadonlySignal<WindowCompositionInteractionSnapshot>;
+   output: import("./signals").ReadonlySignal<string | undefined>;
+diff --git a/src/shojiwm/src/evaluator.rs b/src/shojiwm/src/evaluator.rs
+index b2af521..e61b8bc 100644
+--- a/src/shojiwm/src/evaluator.rs
++++ b/src/shojiwm/src/evaluator.rs
+@@ -4283,6 +4283,7 @@ mod tests {
+         WaylandWindowSnapshot {
+             output_name: None,
+             plasma: None,
++            minimized_geometry: None,
+             id: "1".into(),
+             title: "Kitty".into(),
+             app_id: Some("kitty".into()),
+diff --git a/src/shojiwm/src/lib.rs b/src/shojiwm/src/lib.rs
+index f8c12d2..216b6d0 100644
+--- a/src/shojiwm/src/lib.rs
++++ b/src/shojiwm/src/lib.rs
+@@ -295,6 +295,7 @@ COMPOSITOR.window.composition = (window) => <Label text={{window.title}} />;
+         let window = shojiwm_lib::ssd::WaylandWindowSnapshot {
+             output_name: None,
+             plasma: None,
++            minimized_geometry: None,
+             id: "w1".into(),
+             title: "hello".into(),
+             app_id: Some("test".into()),
+@@ -569,6 +570,7 @@ COMPOSITOR.window.composition = (window) => <Label text={window.title} />;
+         let window = shojiwm_lib::ssd::WaylandWindowSnapshot {
+             output_name: None,
+             plasma: None,
++            minimized_geometry: None,
+             id: "w1".into(),
+             title: "hello".into(),
+             app_id: None,
+diff --git a/src/shojiwm_lib/src/plasma_window_management.rs b/src/shojiwm_lib/src/plasma_window_management.rs
+index 917ee37..243cdb5 100644
+--- a/src/shojiwm_lib/src/plasma_window_management.rs
++++ b/src/shojiwm_lib/src/plasma_window_management.rs
+@@ -27,10 +27,10 @@
+ use std::sync::{Arc, Mutex};
+ 
+ use smithay::{
+-    desktop::Window,
++    desktop::{Window, WindowSurfaceType, layer_map_for_output},
+     reexports::wayland_server::{
+         Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+-        Weak as WaylandWeak, backend::ClientId,
++        Weak as WaylandWeak, backend::ClientId, protocol::wl_surface::WlSurface,
+     },
+ };
+ use wayland_protocols_plasma::plasma_window_management::server::{
+@@ -39,7 +39,7 @@ use wayland_protocols_plasma::plasma_window_management::server::{
+     org_kde_plasma_window_management::{self, OrgKdePlasmaWindowManagement},
+ };
+ 
+-use crate::state::ShojiWM;
++use crate::{ssd::WindowPositionSnapshot, state::ShojiWM};
+ 
+ /// KWin's version. libtaskmanager in Plasma 6 asks for 17+ (it uses
+ /// `get_stacking_order`); 18 only adds the `client_geometry` event.
+@@ -93,6 +93,10 @@ struct PlasmaWindowInner {
+     info: PlasmaWindowInfo,
+     closed: bool,
+     resources: Vec<WaylandWeak<OrgKdePlasmaWindow>>,
++    /// The window's taskbar entry (`set_minimized_geometry`), relative to the
++    /// panel surface that holds it. One per panel; the last one set wins.
++    /// The minimize animation flies the window there.
++    minimized_geometries: Vec<(WaylandWeak<WlSurface>, Rect)>,
+ }
+ 
+ impl PlasmaWindowHandle {
+@@ -104,6 +108,7 @@ impl PlasmaWindowHandle {
+                 info: PlasmaWindowInfo::default(),
+                 closed: false,
+                 resources: Vec::new(),
++                minimized_geometries: Vec::new(),
+             })),
+         }
+     }
+@@ -189,6 +194,30 @@ impl PlasmaWindowHandle {
+         }
+     }
+ 
++    /// Remember (`Some`) or forget (`None`) the taskbar entry on `panel`.
++    /// Returns true when it changed.
++    fn set_minimized_geometry(&self, panel: &WlSurface, rect: Option<Rect>) -> bool {
++        let mut inner = self.inner.lock().unwrap();
++        let before = inner.minimized_geometries.clone();
++        inner
++            .minimized_geometries
++            .retain(|(surface, _)| surface.upgrade().is_ok_and(|surface| surface != *panel));
++        if let Some(rect) = rect {
++            inner.minimized_geometries.push((panel.downgrade(), rect));
++        }
++        inner.minimized_geometries != before
++    }
++
++    /// The last taskbar entry whose panel still exists.
++    fn minimized_geometry(&self) -> Option<(WlSurface, Rect)> {
++        let inner = self.inner.lock().unwrap();
++        inner
++            .minimized_geometries
++            .iter()
++            .rev()
++            .find_map(|(surface, rect)| surface.upgrade().ok().map(|surface| (surface, *rect)))
++    }
++
+     fn remove_resource(&self, resource: &OrgKdePlasmaWindow) {
+         self.inner.lock().unwrap().resources.retain(|candidate| {
+             candidate
+@@ -440,6 +469,55 @@ impl ShojiWM {
+         }
+     }
+ 
++    /// Where the window's taskbar entry is, in global logical coordinates:
++    /// the `set_minimized_geometry` rect moved by its panel's position.
++    /// `None` when no taskbar set one, or its panel is gone.
++    pub fn plasma_minimized_geometry(&self, window: &Window) -> Option<WindowPositionSnapshot> {
++        let handle = window.user_data().get::<PlasmaWindowHandle>()?;
++        let (panel, (x, y, width, height)) = handle.minimized_geometry()?;
++        let (origin_x, origin_y) = self.surface_origin(&panel)?;
++        Some(WindowPositionSnapshot {
++            x: (origin_x + x) as f64,
++            y: (origin_y + y) as f64,
++            width: width as f64,
++            height: height as f64,
++        })
++    }
++
++    /// The global logical position of a panel surface's top-left corner.
++    /// plasmashell's panels are toplevel windows; a layer-shell panel works too.
++    fn surface_origin(&self, surface: &WlSurface) -> Option<(i32, i32)> {
++        if let Some(window) = self
++            .space
++            .elements()
++            .find(|window| Self::window_matches_root_surface(window, surface))
++        {
++            // The element location is the surface's corner (the window
++            // snapshot adds the geometry offset to it for `position`).
++            let loc = self.space.element_location(window)?;
++            return Some((loc.x, loc.y));
++        }
++        for output in self.space.outputs() {
++            let map = layer_map_for_output(output);
++            let Some(layer) = map.layer_for_surface(surface, WindowSurfaceType::TOPLEVEL) else {
++                continue;
++            };
++            let geometry = map.layer_geometry(layer)?;
++            let output_loc = self.space.output_geometry(output)?.loc;
++            return Some((output_loc.x + geometry.loc.x, output_loc.y + geometry.loc.y));
++        }
++        None
++    }
++
++    /// A taskbar entry moved: send the window's snapshot to the runtime again.
++    fn plasma_minimized_geometry_changed(&mut self, window: &Window) {
++        let window_id = self.snapshot_window(window).id;
++        self.runtime_dirty_window_ids.insert(window_id.clone());
++        self.runtime_managed_only_window_ids.remove(&window_id);
++        self.runtime_node_only_window_ids.remove(&window_id);
++        self.runtime_poll_dirty = true;
++    }
++
+     /// The process id of the window's client, or 0 when unknown.
+     fn window_pid(&self, window: &Window) -> u32 {
+         if let Some(x11) = window.x11_surface() {
+@@ -619,8 +697,19 @@ impl Dispatch<OrgKdePlasmaWindow, PlasmaWindowHandle> for ShojiWM {
+             // No icon bytes: dropping the fd closes it, so the client reads
+             // an empty icon and falls back to the app's .desktop icon.
+             Request::GetIcon { fd } => drop(fd),
++            // The taskbar entry, for the Magic Lamp minimize animation.
++            Request::SetMinimizedGeometry { panel, x, y, width, height } => {
++                let rect = (x as i32, y as i32, width as i32, height as i32);
++                if handle.set_minimized_geometry(&panel, Some(rect)) {
++                    state.plasma_minimized_geometry_changed(&window);
++                }
++            }
++            Request::UnsetMinimizedGeometry { panel } => {
++                if handle.set_minimized_geometry(&panel, None) {
++                    state.plasma_minimized_geometry_changed(&window);
++                }
++            }
+             // Not supported: virtual desktops, activities, highlight,
+-            // minimized geometries (for the minimize animation),
+             // interactive move/resize, send to output.
+             _ => {}
+         }
+diff --git a/src/shojiwm_lib/src/ssd/window_model.rs b/src/shojiwm_lib/src/ssd/window_model.rs
+index a774900..52ae11c 100644
+--- a/src/shojiwm_lib/src/ssd/window_model.rs
++++ b/src/shojiwm_lib/src/ssd/window_model.rs
+@@ -47,6 +47,11 @@ pub struct WaylandWindowSnapshot {
+     /// (role, position); `None` for a window without a plasma surface.
+     #[serde(skip_serializing_if = "Option::is_none")]
+     pub plasma: Option<crate::protocols::plasma_shell::PlasmaSurfaceSnapshot>,
++    /// The window's taskbar entry in global logical coordinates, from KDE's
++    /// `org_kde_plasma_window.set_minimized_geometry`; `None` when no taskbar
++    /// set one. The Magic Lamp minimize animation flies the window there.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub minimized_geometry: Option<WindowPositionSnapshot>,
+ }
+ 
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+@@ -919,6 +924,7 @@ impl ShojiWM {
+             }),
+             interaction: DecorationInteractionSnapshot::default(),
+             plasma: crate::protocols::plasma_shell::plasma_surface_snapshot(toplevel.wl_surface()),
++            minimized_geometry: self.plasma_minimized_geometry(window),
+         }
+     }
+ 
+@@ -944,6 +950,7 @@ impl ShojiWM {
+                 icon: None,
+                 interaction: DecorationInteractionSnapshot::default(),
+                 plasma: None,
++                minimized_geometry: None,
+             };
+         };
+ 
+@@ -1020,6 +1027,7 @@ impl ShojiWM {
+             }),
+             interaction: DecorationInteractionSnapshot::default(),
+             plasma: None,
++            minimized_geometry: self.plasma_minimized_geometry(window),
+         }
+     }
+ 
+diff --git a/src/shojiwm_lib/src/state.rs b/src/shojiwm_lib/src/state.rs
+index 64cebe8..2cc9b76 100644
+--- a/src/shojiwm_lib/src/state.rs
++++ b/src/shojiwm_lib/src/state.rs
+@@ -3082,6 +3082,7 @@ impl ShojiWM {
+         let snapshot = WaylandWindowSnapshot {
+             output_name: None,
+             plasma: None,
++            minimized_geometry: None,
+             id: "__warmup__".into(),
+             title: "warmup".into(),
+             app_id: Some("shoji_wm.warmup".into()),
+diff --git a/src/shojiwm_rs/examples/default_config/main.rs b/src/shojiwm_rs/examples/default_config/main.rs
+index 1426985..60f1697 100644
+--- a/src/shojiwm_rs/examples/default_config/main.rs
++++ b/src/shojiwm_rs/examples/default_config/main.rs
+@@ -1115,6 +1115,7 @@ mod tests {
+         WaylandWindowSnapshot {
+             output_name: None,
+             plasma: None,
++            minimized_geometry: None,
+             id: id.into(),
+             title: format!("window {id}"),
+             app_id: Some("org.example.App".into()),
+diff --git a/src/shojiwm_rs/src/window.rs b/src/shojiwm_rs/src/window.rs
+index 3a391cd..1bc19ca 100644
+--- a/src/shojiwm_rs/src/window.rs
++++ b/src/shojiwm_rs/src/window.rs
+@@ -294,6 +294,7 @@ fn empty_snapshot() -> WaylandWindowSnapshot {
+     WaylandWindowSnapshot {
+         output_name: None,
+         plasma: None,
++        minimized_geometry: None,
+         id: String::new(),
+         title: String::new(),
+         app_id: None,
+diff --git a/src/shojiwm_rs/tests/reactive_runtime.rs b/src/shojiwm_rs/tests/reactive_runtime.rs
+index 0108bf2..367616d 100644
+--- a/src/shojiwm_rs/tests/reactive_runtime.rs
++++ b/src/shojiwm_rs/tests/reactive_runtime.rs
+@@ -17,6 +17,7 @@ fn snapshot(id: &str, title: &str, focused: bool) -> WaylandWindowSnapshot {
+     WaylandWindowSnapshot {
+         output_name: None,
+         plasma: None,
++        minimized_geometry: None,
+         id: id.into(),
+         title: title.into(),
+         app_id: Some("test".into()),
+-- 
+2.56.0
+

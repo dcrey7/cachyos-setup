@@ -1,0 +1,36 @@
+From 632480401e81e39496d49226587efcab82116598 Mon Sep 17 00:00:00 2001
+From: Abhishek <abhishek01789@gmail.com>
+Date: Sun, 11 Oct 2026 22:22:10 +0200
+Subject: [PATCH 29/41] Always show at least 4 desktops so KDE's Pager stays
+ visible
+
+---
+ packages/config/src/index.tsx | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/packages/config/src/index.tsx b/packages/config/src/index.tsx
+index 8507dc5..b50d325 100644
+--- a/packages/config/src/index.tsx
++++ b/packages/config/src/index.tsx
+@@ -324,11 +324,17 @@ COMPOSITOR.workspace.configure(() => {
+  * workspace N, so the Pager's numbers match Super+N; empty workspaces in
+  * between show as empty desktops.
+  */
++/**
++ * The Pager always shows at least this many desktops. KDE's Pager hides
++ * itself when there is only one desktop, so without a minimum it vanishes
++ * whenever every window sits on workspace 1.
++ */
++const MIN_PAGER_DESKTOPS = 4;
+ function virtualDesktops(view: ReturnType<typeof HYBRID_WINDOW_MANAGER.viewForIpc>) {
+   const monitorName = HYBRID_WINDOW_MANAGER.getCurrentMonitorName();
+   const monitor = view.monitors.find((candidate) => candidate.name === monitorName);
+   const workspaces = monitor?.workspaces ?? [];
+-  const count = Math.max(1, ...workspaces.map((workspace) => workspace.index));
++  const count = Math.max(MIN_PAGER_DESKTOPS, ...workspaces.map((workspace) => workspace.index));
+   const desktops = Array.from({ length: count }, (_, offset) => {
+     const index = offset + 1;
+     const workspace = workspaces.find((candidate) => candidate.index === index);
+-- 
+2.56.0
+

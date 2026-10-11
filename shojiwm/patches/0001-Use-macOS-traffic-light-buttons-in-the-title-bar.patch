@@ -1,0 +1,262 @@
+From b3d98cb5ddb1884713a9bc0d17dc1a73dde79f4b Mon Sep 17 00:00:00 2001
+From: Abhishek <abhishek01789@gmail.com>
+Date: Sun, 11 Oct 2026 15:39:02 +0200
+Subject: [PATCH 01/41] Use macOS traffic-light buttons in the title bar
+
+Move close, minimize, and maximize to the left in macOS order.
+Color them red, yellow, and green, with grey when the window is
+not focused. Show dark glyphs on hover.
+---
+ packages/config/assets/mac-maximize-2.svg |   1 +
+ packages/config/assets/mac-minimize-2.svg |   1 +
+ packages/config/assets/mac-minus.svg      |   1 +
+ packages/config/assets/mac-x.svg          |   1 +
+ packages/config/src/index.tsx             | 142 ++++++++++------------
+ 5 files changed, 67 insertions(+), 79 deletions(-)
+ create mode 100644 packages/config/assets/mac-maximize-2.svg
+ create mode 100644 packages/config/assets/mac-minimize-2.svg
+ create mode 100644 packages/config/assets/mac-minus.svg
+ create mode 100644 packages/config/assets/mac-x.svg
+
+diff --git a/packages/config/assets/mac-maximize-2.svg b/packages/config/assets/mac-maximize-2.svg
+new file mode 100644
+index 0000000..2030c64
+--- /dev/null
++++ b/packages/config/assets/mac-maximize-2.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#00000099" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-maximize2-icon lucide-maximize-2"><path d="M15 3h6v6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/><path d="M9 21H3v-6"/></svg>
+\ No newline at end of file
+diff --git a/packages/config/assets/mac-minimize-2.svg b/packages/config/assets/mac-minimize-2.svg
+new file mode 100644
+index 0000000..c7bc795
+--- /dev/null
++++ b/packages/config/assets/mac-minimize-2.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#00000099" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-minimize2-icon lucide-minimize-2"><path d="m14 10 7-7"/><path d="M20 10h-6V4"/><path d="m3 21 7-7"/><path d="M4 14h6v6"/></svg>
+\ No newline at end of file
+diff --git a/packages/config/assets/mac-minus.svg b/packages/config/assets/mac-minus.svg
+new file mode 100644
+index 0000000..908acbb
+--- /dev/null
++++ b/packages/config/assets/mac-minus.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#00000099" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-minus-icon lucide-minus"><path d="M5 12h14"/></svg>
+\ No newline at end of file
+diff --git a/packages/config/assets/mac-x.svg b/packages/config/assets/mac-x.svg
+new file mode 100644
+index 0000000..d8e4ab0
+--- /dev/null
++++ b/packages/config/assets/mac-x.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#00000099" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x-icon lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+\ No newline at end of file
+diff --git a/packages/config/src/index.tsx b/packages/config/src/index.tsx
+index dac30a4..3730f4b 100644
+--- a/packages/config/src/index.tsx
++++ b/packages/config/src/index.tsx
+@@ -952,12 +952,13 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
+   const maximizeButton = <MaximizeButton window={window} />;
+   const closeButton = <CloseButton window={window} />;
+ 
++  // macOS order: traffic lights on the left, then the icon and the title.
+   const titlebarContent = [
+-    appIcon,
+-    label,
++    closeButton,
+     minimizeButton,
+     maximizeButton,
+-    closeButton,
++    appIcon,
++    label,
+   ];
+   var innerComponents = (
+     <Box direction="column">
+@@ -1094,41 +1095,60 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
+   );
+ };
+ 
+-const CloseButton = ({ window }: { window: WaylandWindow }) => {
+-  const [hover, setHover] = useState(false);
++// macOS-style traffic lights. Unfocused windows show grey lights, as on macOS.
++const TRAFFIC_LIGHT_SIZE = 12;
++const TRAFFIC_LIGHT_BORDER = "#00000033";
++const TRAFFIC_LIGHT_COLORS = {
++  close: "#FF5F57",
++  minimize: "#FEBC2E",
++  maximize: "#28C840",
++  inactive: "#FFFFFF30",
++};
+ 
+-  const borderColor = hover((hover) => (hover ? "#00000000" : "#F0808030"));
++const trafficLightColor = (window: WaylandWindow, color: string) =>
++  window.isFocused((focused) =>
++    focused ? color : TRAFFIC_LIGHT_COLORS.inactive,
++  );
+ 
+-  var icon: CompositionRenderable | null = null;
+-  if (hover()) {
+-    icon = (
+-      <Image
+-        src="./assets/x.svg"
+-        style={{
+-          width: 16,
+-          height: 16,
+-          position: "absolute",
+-          zIndex: 1,
+-          pointerEvents: "none",
+-        }}
+-      />
+-    );
+-  }
++const trafficLightStyle = (background: string | ReadonlySignal<string>) => ({
++  width: TRAFFIC_LIGHT_SIZE,
++  height: TRAFFIC_LIGHT_SIZE,
++  borderRadius: TRAFFIC_LIGHT_SIZE / 2,
++  background,
++  border: { px: 1, color: TRAFFIC_LIGHT_BORDER },
++});
++
++/** The dark glyph that shows on a traffic light while the pointer is on it. */
++const TrafficLightGlyph = ({
++  src,
++}: {
++  src: string | ReadonlySignal<string>;
++}) => (
++  <Image
++    src={src}
++    style={{
++      width: TRAFFIC_LIGHT_SIZE,
++      height: TRAFFIC_LIGHT_SIZE,
++      position: "absolute",
++      zIndex: 1,
++      pointerEvents: "none",
++    }}
++  />
++);
++
++const CloseButton = ({ window }: { window: WaylandWindow }) => {
++  const [hover, setHover] = useState(false);
+ 
+   return (
+     <Box style={{ position: "relative", flexShrink: 0 }}>
+       <Button
+         onHoverChange={setHover}
+-        style={{
+-          width: 16,
+-          height: 16,
+-          borderRadius: 8,
+-          background: "#FFFFFF20",
+-          border: { px: 1, color: borderColor },
+-        }}
++        style={trafficLightStyle(
++          trafficLightColor(window, TRAFFIC_LIGHT_COLORS.close),
++        )}
+         onClick={window.close}
+       />
+-      {icon}
++      {hover() ? <TrafficLightGlyph src="./assets/mac-x.svg" /> : null}
+     </Box>
+   );
+ };
+@@ -1178,45 +1198,31 @@ const TitlebarTooltip = ({
+ const MaximizeButton = ({ window }: { window: WaylandWindow }) => {
+   const [hover, setHover] = useState(false);
+ 
+-  const borderColor = computed(() => {
+-    if (!window.isResizable()) {
+-      return "#00000000";
++  // A window that cannot resize gets a grey light, like on macOS.
++  const background = computed(() => {
++    if (!window.isResizable() || !window.isFocused()) {
++      return TRAFFIC_LIGHT_COLORS.inactive;
+     }
+-    return hover() ? "#00000000" : "#00BFFF30";
++    return TRAFFIC_LIGHT_COLORS.maximize;
+   });
+   const shouldHover = computed(() => hover() && window.isResizable());
+ 
+   var icon: CompositionRenderable | null = null;
+   if (shouldHover()) {
+     const src = window.isMaximized((maximized) => {
+-      return maximized ? "./assets/minimize-2.svg" : "./assets/maximize-2.svg";
++      return maximized
++        ? "./assets/mac-minimize-2.svg"
++        : "./assets/mac-maximize-2.svg";
+     });
+ 
+-    icon = (
+-      <Image
+-        src={src}
+-        style={{
+-          width: 16,
+-          height: 16,
+-          position: "absolute",
+-          zIndex: 1,
+-          pointerEvents: "none",
+-        }}
+-      />
+-    );
++    icon = <TrafficLightGlyph src={src} />;
+   }
+ 
+   return (
+     <Box style={{ position: "relative", flexShrink: 0 }}>
+       <Button
+         onHoverChange={setHover}
+-        style={{
+-          width: 16,
+-          height: 16,
+-          borderRadius: 8,
+-          background: "#FFFFFF20",
+-          border: { px: 1, color: borderColor },
+-        }}
++        style={trafficLightStyle(background)}
+         onClick={() => {
+           if (!read(window.isResizable)) {
+             return;
+@@ -1244,38 +1250,16 @@ const MaximizeButton = ({ window }: { window: WaylandWindow }) => {
+ const MinimizeButton = ({ window }: { window: WaylandWindow }) => {
+   const [hover, setHover] = useState(false);
+ 
+-  const borderColor = hover((hover) => (hover ? "#00000000" : "#F8FF7530"));
+-
+-  var icon: CompositionRenderable | null = null;
+-  if (hover()) {
+-    icon = (
+-      <Image
+-        src="./assets/minus.svg"
+-        style={{
+-          width: 16,
+-          height: 16,
+-          position: "absolute",
+-          zIndex: 1,
+-          pointerEvents: "none",
+-        }}
+-      />
+-    );
+-  }
+-
+   return (
+     <Box style={{ position: "relative", flexShrink: 0 }}>
+       <Button
+         onHoverChange={setHover}
+-        style={{
+-          width: 16,
+-          height: 16,
+-          borderRadius: 8,
+-          background: "#FFFFFF20",
+-          border: { px: 1, color: borderColor },
+-        }}
++        style={trafficLightStyle(
++          trafficLightColor(window, TRAFFIC_LIGHT_COLORS.minimize),
++        )}
+         onClick={() => window.minimize()}
+       />
+-      {icon}
++      {hover() ? <TrafficLightGlyph src="./assets/mac-minus.svg" /> : null}
+       <TitlebarTooltip text="Minimize" />
+     </Box>
+   );
+-- 
+2.56.0
+

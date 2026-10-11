@@ -1,0 +1,26 @@
+From 972ae921fd5920a221eed13611a57f52360267d0 Mon Sep 17 00:00:00 2001
+From: Abhishek <abhishek01789@gmail.com>
+Date: Sun, 11 Oct 2026 16:51:11 +0200
+Subject: [PATCH 12/41] Tell plasmashell it runs on KDE inside the ShojiWM
+ session
+
+---
+ packages/config/src/index.tsx | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/packages/config/src/index.tsx b/packages/config/src/index.tsx
+index 0f18a00..4b384ef 100644
+--- a/packages/config/src/index.tsx
++++ b/packages/config/src/index.tsx
+@@ -361,6 +361,8 @@ if (!INSIDE_KDE) {
+   // The KDE desktop: your taskbar, start menu, icons, tray and wallpaper.
+   COMPOSITOR.process.service("plasmashell", {
+     command: ["plasmashell", "--no-respawn"],
++    // The session says "ShojiWM"; plasmashell wants to know it runs KDE.
++    env: { XDG_CURRENT_DESKTOP: "KDE" },
+     restart: "on-exit",
+   });
+   // The KDE window that asks for your password when an app needs admin rights.
+-- 
+2.56.0
+

@@ -24,7 +24,10 @@ PlasmoidItem {
             return
         }
 
-        executable.connectSource("qdbus6 org.kde.KWin /KWin org.kde.KWin.setCurrentDesktop " + (index + 1))
+        // requestActivate is not callable from QML, so a script switches:
+        // ShojiWM's IPC socket under ShojiWM, KWin's D-Bus under plain KDE.
+        const script = Qt.resolvedUrl("../code/switch.sh").toString().replace("file://", "")
+        executable.connectSource("bash '" + script + "' '" + desktopId + "'")
     }
 
     preferredRepresentation: fullRepresentation

@@ -53,6 +53,13 @@ system Darkly Qt6 style plugin, and removes `~/zsh-setup`. Pass
 `--keep-packages`, `--keep-darkly-binary`, or `--keep-zsh-repo` for a softer
 uninstall that leaves those in place.
 
+## ShojiWM session (optional)
+
+`shojiwm/` adds a second login session. ShojiWM replaces KWin, and the same KDE
+taskbar, Kickoff and look stay on top. It adds scrolling tiling, Coverflow
+Alt+Tab, Wobbly drag and Magic Lamp. Run `bash shojiwm/install.sh` after the
+main installer, then pick "ShojiWM" at login. See `shojiwm/README.md`.
+
 ## Live USB caveat
 
 If this is run from a live session, changes usually do not persist after reboot. Run it from the installed CachyOS system for permanent configuration.
