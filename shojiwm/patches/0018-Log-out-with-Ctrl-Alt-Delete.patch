@@ -1,0 +1,29 @@
+From 90a384c14e5fdac193b8b26ec06bfe7a8668d6b2 Mon Sep 17 00:00:00 2001
+From: Abhishek <abhishek01789@gmail.com>
+Date: Sun, 11 Oct 2026 18:01:50 +0200
+Subject: [PATCH 18/32] Log out with Ctrl+Alt+Delete
+
+---
+ packages/config/src/index.tsx | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/packages/config/src/index.tsx b/packages/config/src/index.tsx
+index 6e58123..e76b4dc 100644
+--- a/packages/config/src/index.tsx
++++ b/packages/config/src/index.tsx
+@@ -518,6 +518,12 @@ COMPOSITOR.key.bind("lock", "Super+L", () => {
+   COMPOSITOR.process.spawn({ command: LOCK_COMMAND });
+ });
+ 
++// Log out, like Ctrl+Alt+Delete in KDE. Plasma's own "Log Out" button needs
++// KDE's session manager, which does not run under ShojiWM.
++COMPOSITOR.key.bind("logout", "Ctrl+Alt+Delete", () => {
++  COMPOSITOR.process.spawn({ command: "shoji_wm --quit" });
++});
++
+ // Auto-lock: lock after 10 minutes away, and before the PC goes to sleep.
+ // `loginctl lock-session` (and the KDE "Lock" button) also land here.
+ if (!INSIDE_KDE) {
+-- 
+2.56.0
+

@@ -1,0 +1,27 @@
+From c2868c3d80a11673c49724076647cc22438b6eef Mon Sep 17 00:00:00 2001
+From: Abhishek <abhishek01789@gmail.com>
+Date: Sun, 11 Oct 2026 15:43:04 +0200
+Subject: [PATCH 03/32] Replace the gold focus border with a faint white
+ hairline
+
+---
+ packages/config/src/index.tsx | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/packages/config/src/index.tsx b/packages/config/src/index.tsx
+index de35bf2..874045a 100644
+--- a/packages/config/src/index.tsx
++++ b/packages/config/src/index.tsx
+@@ -872,7 +872,8 @@ COMPOSITOR.window.composition = (window: WaylandWindow) => {
+   );
+ 
+   const borderColor = window.isFocused((focused) =>
+-    focused ? "#d7ba7d" : "#4f5666",
++    // A faint white hairline, like macOS, instead of a gold focus border.
++    focused ? "#FFFFFF26" : "#FFFFFF14",
+   );
+   // A soft drop shadow under the frame; the focused window floats a bit higher.
+   // The window selected in the window switcher glows white instead (it fits
+-- 
+2.56.0
+

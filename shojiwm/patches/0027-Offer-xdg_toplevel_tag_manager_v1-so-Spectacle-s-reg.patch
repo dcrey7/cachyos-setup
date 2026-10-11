@@ -1,0 +1,110 @@
+From 237f1619938154eb644b54dce4fb9afd22e59778 Mon Sep 17 00:00:00 2001
+From: Abhishek <abhishek01789@gmail.com>
+Date: Sun, 11 Oct 2026 22:10:20 +0200
+Subject: [PATCH 27/32] Offer xdg_toplevel_tag_manager_v1 so Spectacle's region
+ mode starts
+
+KWindowSystem 6.30 sets toplevel tags without checking that the compositor
+offers the protocol. Without the global, spectacle -r crashed in
+wl_proxy_get_version(NULL) while making its overlay. The tags are accepted
+and ignored.
+---
+ src/shojiwm_lib/src/lib.rs              |  1 +
+ src/shojiwm_lib/src/state.rs            |  1 +
+ src/shojiwm_lib/src/xdg_toplevel_tag.rs | 60 +++++++++++++++++++++++++
+ 3 files changed, 62 insertions(+)
+ create mode 100644 src/shojiwm_lib/src/xdg_toplevel_tag.rs
+
+diff --git a/src/shojiwm_lib/src/lib.rs b/src/shojiwm_lib/src/lib.rs
+index 0426433..4c19997 100644
+--- a/src/shojiwm_lib/src/lib.rs
++++ b/src/shojiwm_lib/src/lib.rs
+@@ -49,6 +49,7 @@ pub mod keyboard_layout;
+ pub mod output_power;
+ pub mod plasma_virtual_desktop;
+ pub mod plasma_window_management;
++pub mod xdg_toplevel_tag;
+ pub mod presentation;
+ pub mod presentation_test_client;
+ pub mod process_env;
+diff --git a/src/shojiwm_lib/src/state.rs b/src/shojiwm_lib/src/state.rs
+index 60240a7..41da990 100644
+--- a/src/shojiwm_lib/src/state.rs
++++ b/src/shojiwm_lib/src/state.rs
+@@ -1578,6 +1578,7 @@ impl ShojiWM {
+             crate::plasma_window_management::PlasmaWindowManagementState::new(&dh);
+         let plasma_virtual_desktop_state =
+             crate::plasma_virtual_desktop::PlasmaVirtualDesktopState::new(&dh);
++        crate::xdg_toplevel_tag::init_xdg_toplevel_tag(&dh);
+         let plasma_shell_state = crate::protocols::plasma_shell::PlasmaShellState::new(&dh);
+         let ext_workspace_manager_state =
+             crate::workspace_manager::ExtWorkspaceManagerState::new::<Self>(&dh);
+diff --git a/src/shojiwm_lib/src/xdg_toplevel_tag.rs b/src/shojiwm_lib/src/xdg_toplevel_tag.rs
+new file mode 100644
+index 0000000..ccb9ece
+--- /dev/null
++++ b/src/shojiwm_lib/src/xdg_toplevel_tag.rs
+@@ -0,0 +1,60 @@
++//! `xdg_toplevel_tag_manager_v1` server (staging xdg-toplevel-tag-v1.xml).
++//!
++//! A client tags its windows ("org.kde.spectacle" overlay, a main window)
++//! so a compositor can remember window rules across restarts. ShojiWM has
++//! no use for the tags and only accepts them.
++//!
++//! The global must exist anyway: KDE's KWindowSystem (6.30) calls
++//! `set_toplevel_tag` without checking that the compositor offers the
++//! protocol. Without the global, Spectacle's region mode (`spectacle -r`)
++//! crashes in `wl_proxy_get_version(NULL)` as its overlay window is made.
++
++use smithay::reexports::wayland_server::{
++    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New,
++};
++use wayland_protocols::xdg::toplevel_tag::v1::server::xdg_toplevel_tag_manager_v1::{
++    self, XdgToplevelTagManagerV1,
++};
++
++use crate::state::ShojiWM;
++
++const VERSION: u32 = 1;
++
++/// Creates the global. Nothing to keep: the requests are ignored.
++pub fn init_xdg_toplevel_tag(display: &DisplayHandle) {
++    display.create_global::<ShojiWM, XdgToplevelTagManagerV1, _>(VERSION, ());
++}
++
++impl GlobalDispatch<XdgToplevelTagManagerV1, ()> for ShojiWM {
++    fn bind(
++        _state: &mut Self,
++        _dh: &DisplayHandle,
++        _client: &Client,
++        resource: New<XdgToplevelTagManagerV1>,
++        _global_data: &(),
++        data_init: &mut DataInit<'_, Self>,
++    ) {
++        data_init.init(resource, ());
++    }
++}
++
++impl Dispatch<XdgToplevelTagManagerV1, ()> for ShojiWM {
++    fn request(
++        _state: &mut Self,
++        _client: &Client,
++        _resource: &XdgToplevelTagManagerV1,
++        request: xdg_toplevel_tag_manager_v1::Request,
++        _data: &(),
++        _dh: &DisplayHandle,
++        _data_init: &mut DataInit<'_, Self>,
++    ) {
++        use xdg_toplevel_tag_manager_v1::Request;
++        match request {
++            // Accepted and ignored (see the module header).
++            Request::SetToplevelTag { .. } => {}
++            Request::SetToplevelDescription { .. } => {}
++            Request::Destroy => {}
++            _ => {}
++        }
++    }
++}
+-- 
+2.56.0
+

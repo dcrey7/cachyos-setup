@@ -1,0 +1,49 @@
+From 309d71919de8283228553df38f499d6d38748ae3 Mon Sep 17 00:00:00 2001
+From: Abhishek <abhishek01789@gmail.com>
+Date: Sun, 11 Oct 2026 17:31:51 +0200
+Subject: [PATCH 13/32] Use the Breeze cursor and let Alt release pick in the
+ switcher
+
+The author's Bibata cursor theme is not installed here, so the cursor
+fell back to a plain one. Releasing Alt now commits Alt+Tab, the same
+as releasing Super commits Super+Tab.
+---
+ packages/config/src/index.tsx           | 2 +-
+ packages/config/src/window-switcher.tsx | 8 +++++++-
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/packages/config/src/index.tsx b/packages/config/src/index.tsx
+index 4b384ef..fe6ee37 100644
+--- a/packages/config/src/index.tsx
++++ b/packages/config/src/index.tsx
+@@ -69,7 +69,7 @@ COMPOSITOR.env.apply({
+ COMPOSITOR.env.publish();
+ 
+ COMPOSITOR.cursor.configure({
+-  theme: "Bibata-Modern-Ice",
++  theme: "breeze_cursors", // KDE default cursor, like Abhishek's KDE
+   size: 24,
+ });
+ 
+diff --git a/packages/config/src/window-switcher.tsx b/packages/config/src/window-switcher.tsx
+index 02704ee..20f49df 100644
+--- a/packages/config/src/window-switcher.tsx
++++ b/packages/config/src/window-switcher.tsx
+@@ -391,7 +391,13 @@ export function createWindowSwitcher<State>(
+     session.grab = COMPOSITOR.input.grab({
+       onKey: (event) => {
+         if (event.state === "released") {
+-          if (event.key === "Super_L" || event.key === "Super_R") {
++          // Releasing Super (Super+Tab) or Alt (Alt+Tab) picks the window.
++          if (
++            event.key === "Super_L" ||
++            event.key === "Super_R" ||
++            event.key === "Alt_L" ||
++            event.key === "Alt_R"
++          ) {
+             layout.onSuperReleased(state, controls);
+           }
+           return;
+-- 
+2.56.0
+

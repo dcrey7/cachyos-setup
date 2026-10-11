@@ -1,0 +1,1756 @@
+From a49bd7dffe2d3ed1016569e497c5254d93734341 Mon Sep 17 00:00:00 2001
+From: Abhishek <abhishek01789@gmail.com>
+Date: Sun, 11 Oct 2026 17:58:59 +0200
+Subject: [PATCH 17/32] Speak KDE's taskbar and plasma-shell protocols, start
+ kglobalaccel
+
+Add org_kde_plasma_window_management (v18) so the KDE taskbar lists,
+groups and activates windows, and org_kde_plasma_shell (v8) so Kickoff,
+tray popups and notifications sit where plasmashell asks, with no tiling
+and no title bar. Start kglobalacceld on its X11 backend before
+plasmashell, so Kickoff gets its shortcut and Super can open it.
+---
+ Cargo.lock                                    |   2 +
+ packages/config/src/index.tsx                 | 141 +++-
+ packages/config/src/window-manager.ts         |  20 +-
+ packages/shoji_wm/src/index.ts                |   2 +
+ packages/shoji_wm/src/reactive-window.ts      |   7 +
+ packages/shoji_wm/src/types.ts                |  34 +
+ src/shojiwm/src/evaluator.rs                  |   1 +
+ src/shojiwm/src/lib.rs                        |   2 +
+ src/shojiwm_lib/Cargo.toml                    |   3 +
+ src/shojiwm_lib/src/foreign_toplevel.rs       |  15 +
+ src/shojiwm_lib/src/input.rs                  |   2 +-
+ src/shojiwm_lib/src/lib.rs                    |   1 +
+ .../src/plasma_window_management.rs           | 637 ++++++++++++++++++
+ src/shojiwm_lib/src/protocols/mod.rs          |   1 +
+ src/shojiwm_lib/src/protocols/plasma_shell.rs | 240 +++++++
+ src/shojiwm_lib/src/ssd/integration.rs        |   2 +-
+ src/shojiwm_lib/src/ssd/window_model.rs       |   7 +
+ src/shojiwm_lib/src/state.rs                  |  10 +
+ src/shojiwm_lib/src/wlr_foreign_toplevel.rs   |  95 +--
+ .../examples/default_config/main.rs           |   1 +
+ src/shojiwm_rs/src/window.rs                  |   1 +
+ src/shojiwm_rs/tests/reactive_runtime.rs      |   1 +
+ 22 files changed, 1180 insertions(+), 45 deletions(-)
+ create mode 100644 src/shojiwm_lib/src/plasma_window_management.rs
+ create mode 100644 src/shojiwm_lib/src/protocols/plasma_shell.rs
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 10ae949..73308a0 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -5147,6 +5147,7 @@ dependencies = [
+  "wayland-backend",
+  "wayland-client",
+  "wayland-protocols",
++ "wayland-protocols-plasma",
+  "wayland-protocols-wlr",
+  "wayland-scanner",
+  "wayland-server",
+@@ -7136,6 +7137,7 @@ dependencies = [
+  "wayland-client",
+  "wayland-protocols",
+  "wayland-scanner",
++ "wayland-server",
+ ]
+ 
+ [[package]]
+diff --git a/packages/config/src/index.tsx b/packages/config/src/index.tsx
+index fe6ee37..6e58123 100644
+--- a/packages/config/src/index.tsx
++++ b/packages/config/src/index.tsx
+@@ -14,6 +14,8 @@ import {
+   dualKawaseBlur,
+   type SSDStyle,
+   type WaylandWindow,
++  type PlasmaSurfaceRole,
++  type PlasmaSurfaceState,
+   computed,
+   useState,
+   shaderStage,
+@@ -78,10 +80,38 @@ COMPOSITOR.process.once("GTK-CSD-control-buttons", {
+   runPolicy: "once-per-session",
+ });
+ 
+-COMPOSITOR.window.decoration.configure((_window, context) => {
++COMPOSITOR.window.decoration.configure((window, context) => {
++  // plasmashell draws its popups and panels itself: no title bar on them.
++  if (isPlasmaShellWindow(window)) {
++    return { mode: "client" };
++  }
+   return { mode: context.clientPreference ?? "server" };
+ });
+ 
++/**
++ * plasmashell's own windows: Kickoff, tray popups, the calendar, OSDs,
++ * notifications, tooltips. KDE's plasma-shell protocol gives each one a
++ * role other than "normal" and a screen position.
++ *
++ * The window manager never sees them: no tiling, no workspace, no window
++ * switcher, no title bar. They sit where plasmashell asks, above normal
++ * windows (see `plasmaShellComposition`).
++ */
++function isPlasmaShellWindow(window: WaylandWindow): boolean {
++  const role = window.plasma.peek()?.role;
++  return role !== undefined && role !== "normal";
++}
++
++/** Shell windows that need the keyboard as soon as they open. */
++function plasmaShellWindowTakesFocus(window: WaylandWindow): boolean {
++  const plasma = window.plasma.peek();
++  // Kickoff and the other applet popups have search fields and lists.
++  return (
++    plasma?.role === "appletpopup" ||
++    (plasma?.role === "panel" && plasma.panelTakesFocus)
++  );
++}
++
+ // enable triple buffer mode for massive performance
+ COMPOSITOR.rendering.framePacing = "throughput";
+ 
+@@ -358,9 +388,30 @@ const INSIDE_KDE =
+   ).Deno?.env.get("KDE_FULL_SESSION") === "true";
+ 
+ if (!INSIDE_KDE) {
++  // KDE's shortcut service. In KDE, KWin gives it a Wayland backend; here it
++  // runs on its X11 backend. plasmashell needs it to give Kickoff a
++  // shortcut, and without one `activateLauncherMenu` (Super) does nothing.
++  COMPOSITOR.process.service("kglobalaccel", {
++    command: [
++      "env",
++      "-u",
++      "WAYLAND_DISPLAY",
++      "KGLOBALACCELD_PLATFORM=xcb",
++      "QT_QPA_PLATFORM=xcb",
++      "XDG_SESSION_TYPE=x11",
++      "/usr/lib/kglobalacceld",
++    ],
++    restart: "on-exit",
++  });
+   // The KDE desktop: your taskbar, start menu, icons, tray and wallpaper.
++  // It waits up to 3 s for the shortcut service, then starts. Errors go to
++  // ~/.local/state/plasmashell.log.
+   COMPOSITOR.process.service("plasmashell", {
+-    command: ["plasmashell", "--no-respawn"],
++    command: [
++      "sh",
++      "-c",
++      'for i in 1 2 3 4 5 6; do qdbus6 org.kde.kglobalaccel >/dev/null 2>&1 && break; sleep 0.5; done; exec plasmashell --no-respawn 2>>"$HOME/.local/state/plasmashell.log"',
++    ],
+     // The session says "ShojiWM"; plasmashell wants to know it runs KDE.
+     env: { XDG_CURRENT_DESKTOP: "KDE" },
+     restart: "on-exit",
+@@ -870,31 +921,61 @@ COMPOSITOR.rendering.surfacePolicy = (surface) => {
+   return null;
+ };
+ 
++// plasmashell's own windows skip the window manager in every handler
++// below (see `isPlasmaShellWindow`).
+ COMPOSITOR.event.onOpen((window) => {
++  if (isPlasmaShellWindow(window)) {
++    if (plasmaShellWindowTakesFocus(window)) {
++      window.focus();
++    }
++    return;
++  }
+   HYBRID_WINDOW_MANAGER.onOpen(window);
+ });
+ 
+ COMPOSITOR.event.onInitialConfigure((window) => {
++  if (isPlasmaShellWindow(window)) {
++    return;
++  }
+   HYBRID_WINDOW_MANAGER.onInitialConfigure(window);
+ });
+ 
+ COMPOSITOR.event.onFirstCommit((window) => {
++  if (isPlasmaShellWindow(window)) {
++    return;
++  }
+   HYBRID_WINDOW_MANAGER.onFirstCommit(window);
+   scheduleWorkspaceBroadcast();
+ });
+ 
+ COMPOSITOR.event.onStartClose((window) => {
++  if (isPlasmaShellWindow(window)) {
++    return;
++  }
+   HYBRID_WINDOW_MANAGER.onStartClose(window);
+   scheduleWorkspaceBroadcast();
+ });
+ 
+ COMPOSITOR.event.onClose((window) => {
++  if (isPlasmaShellWindow(window)) {
++    // A focused popup can close before it reports the focus loss.
++    if (window.isFocused.peek()) {
++      HYBRID_WINDOW_MANAGER.setPointerFocusPaused(false);
++    }
++    return;
++  }
+   HYBRID_WINDOW_MANAGER.onClose(window);
+   jellyDragForget(window);
+   scheduleWorkspaceBroadcast();
+ });
+ 
+ COMPOSITOR.event.onFocus((window, focused) => {
++  if (isPlasmaShellWindow(window)) {
++    // plasmashell closes Kickoff when it loses focus. Do not let the
++    // pointer move focus to a tiled window while a shell popup has it.
++    HYBRID_WINDOW_MANAGER.setPointerFocusPaused(focused);
++    return;
++  }
+   HYBRID_WINDOW_MANAGER.onFocus(window, focused);
+   if (focused) {
+     HYBRID_WINDOW_MANAGER.recordFocus(window.id);
+@@ -944,6 +1025,9 @@ COMPOSITOR.event.onDestroyLayer(() => {
+ });
+ 
+ COMPOSITOR.event.onWindowResize((event) => {
++  if (isPlasmaShellWindow(event.window)) {
++    return;
++  }
+   HYBRID_WINDOW_MANAGER.onWindowResize(event);
+ });
+ 
+@@ -952,23 +1036,39 @@ COMPOSITOR.pointer.bindWindowResizeModifier("Super");
+ COMPOSITOR.cursor.bindAppLockIgnoreModifier("Super");
+ 
+ COMPOSITOR.event.onWindowMove((event) => {
++  if (isPlasmaShellWindow(event.window)) {
++    return;
++  }
+   HYBRID_WINDOW_MANAGER.onWindowMove(event);
+   jellyDragOnWindowMove(event);
+ });
+ 
+ COMPOSITOR.event.onWindowMaximizeRequest((event) => {
++  if (isPlasmaShellWindow(event.window)) {
++    return;
++  }
+   HYBRID_WINDOW_MANAGER.onWindowMaximizeRequest(event);
+ });
+ 
+ COMPOSITOR.event.onWindowMinimizeRequest((event) => {
++  if (isPlasmaShellWindow(event.window)) {
++    return;
++  }
+   HYBRID_WINDOW_MANAGER.onWindowMinimizeRequest(event);
+ });
+ 
+ COMPOSITOR.event.onWindowFullscreenRequest((event) => {
++  if (isPlasmaShellWindow(event.window)) {
++    return;
++  }
+   HYBRID_WINDOW_MANAGER.onWindowFullscreenRequest(event);
+ });
+ 
+ COMPOSITOR.event.onWindowActivateRequest((event) => {
++  if (isPlasmaShellWindow(event.window)) {
++    event.window.focus();
++    return;
++  }
+   HYBRID_WINDOW_MANAGER.onWindowActivateRequest(event);
+   scheduleWorkspaceBroadcast();
+ });
+@@ -983,7 +1083,44 @@ function naturalRootRect(window: WaylandWindow): ManagedWindowRect {
+   };
+ }
+ 
++// Stack order of plasmashell's windows: the desktop under everything, the
++// rest above every normal window (even a fullscreen one, as in KWin).
++const PLASMA_Z_INDEX: Record<PlasmaSurfaceRole, number> = {
++  normal: 0,
++  desktop: -2_100_000_000,
++  panel: 2_050_000_000,
++  appletpopup: 2_100_000_000,
++  notification: 2_110_000_000,
++  onscreendisplay: 2_110_000_000,
++  criticalnotification: 2_120_000_000,
++  tooltip: 2_130_000_000,
++};
++
++/** A plasmashell window: bare client surface where plasmashell asked. */
++function plasmaShellComposition(
++  window: WaylandWindow,
++  plasma: PlasmaSurfaceState,
++) {
++  const rect = computed(() => ({
++    // Before plasmashell sends a position, keep the window where it is.
++    x: plasma.x ?? window.position.x,
++    y: plasma.y ?? window.position.y,
++    width: window.position.width,
++    height: window.position.height,
++  }));
++  return (
++    <ManagedWindow rect={rect} zIndex={PLASMA_Z_INDEX[plasma.role]}>
++      <ClientWindow />
++    </ManagedWindow>
++  );
++}
++
+ COMPOSITOR.window.composition = (window: WaylandWindow) => {
++  const plasma = window.plasma();
++  if (plasma && plasma.role !== "normal") {
++    return plasmaShellComposition(window, plasma);
++  }
++
+   const decoration = window.decoration();
+   const useClientDecoration =
+     decoration.mode === "client" &&
+diff --git a/packages/config/src/window-manager.ts b/packages/config/src/window-manager.ts
+index 1ce2c68..26ec1d2 100644
+--- a/packages/config/src/window-manager.ts
++++ b/packages/config/src/window-manager.ts
+@@ -2468,11 +2468,23 @@ export class HybridWindowManager {
+     this.applyWorkspaceStackPolicy(gesture.fromWorkspace);
+   }
+ 
++  /**
++   * While true, the pointer does not move focus to the tiled window under
++   * it. The config sets this while a plasmashell popup (Kickoff, a tray
++   * popup) has the keyboard: plasmashell closes the popup when it loses
++   * focus, so hovering a window on the way would close the menu.
++   */
++  private pointerFocusPaused = false;
++
++  public setPointerFocusPaused(paused: boolean) {
++    this.pointerFocusPaused = paused;
++  }
++
+   private focusWindowAtPointerTarget(
+     target: PointerMoveEvent["target"],
+     monitorHint?: string,
+   ) {
+-    if (target.kind !== "window") {
++    if (target.kind !== "window" || this.pointerFocusPaused) {
+       return;
+     }
+ 
+@@ -2503,7 +2515,11 @@ export class HybridWindowManager {
+     position: PointerMoveEvent["position"] | null | undefined,
+     monitorHint?: string,
+   ) {
+-    if (!position || this.lastPointerTarget.kind === "layer") {
++    if (
++      !position ||
++      this.lastPointerTarget.kind === "layer" ||
++      this.pointerFocusPaused
++    ) {
+       return;
+     }
+ 
+diff --git a/packages/shoji_wm/src/index.ts b/packages/shoji_wm/src/index.ts
+index 4e3d323..65adbe1 100644
+--- a/packages/shoji_wm/src/index.ts
++++ b/packages/shoji_wm/src/index.ts
+@@ -725,6 +725,8 @@ export type {
+   WaylandWindowActions,
+   WaylandWindowSnapshot,
+   WaylandWindow,
++  PlasmaSurfaceRole,
++  PlasmaSurfaceState,
+   LayerPosition,
+   ReactiveWaylandLayer,
+   ReactiveWaylandLayerHandle,
+diff --git a/packages/shoji_wm/src/reactive-window.ts b/packages/shoji_wm/src/reactive-window.ts
+index 7e747fb..c7c5644 100644
+--- a/packages/shoji_wm/src/reactive-window.ts
++++ b/packages/shoji_wm/src/reactive-window.ts
+@@ -16,6 +16,7 @@ import type {
+   WaylandWindowActions,
+   WaylandWindowSnapshot,
+   ManagedWindowState,
++  PlasmaSurfaceState,
+   WindowIcon,
+   WindowDecorationState,
+   WindowPosition,
+@@ -39,6 +40,7 @@ interface MutableWindowSignals {
+   isResizable: Signal<boolean>;
+   isTransient: Signal<boolean>;
+   parentId: Signal<string | undefined>;
++  plasma: Signal<PlasmaSurfaceState | undefined>;
+   icon: Signal<WindowIcon | undefined>;
+   interaction: Signal<WindowCompositionInteractionSnapshot>;
+   decoration: Signal<WindowDecorationState>;
+@@ -76,6 +78,7 @@ export function createReactiveWindow(
+     isResizable: signal(snapshot.isResizable),
+     isTransient: signal(snapshot.isTransient),
+     parentId: signal(snapshot.parentId),
++    plasma: signal(snapshot.plasma),
+     icon: signal(snapshot.icon),
+     interaction: signal(snapshot.interaction),
+     decoration: signal(snapshot.decoration),
+@@ -176,6 +179,7 @@ export function createReactiveWindow(
+     isResizable: signals.isResizable,
+     isTransient: signals.isTransient,
+     parentId: signals.parentId,
++    plasma: signals.plasma,
+     icon: signals.icon,
+     interaction: signals.interaction,
+     decoration: signals.decoration,
+@@ -245,6 +249,9 @@ export function createReactiveWindow(
+         ) {
+           signals.sizeConstraints.value = nextSnapshot.sizeConstraints;
+         }
++        if (!shallowEqual(signals.plasma.peek(), nextSnapshot.plasma)) {
++          signals.plasma.value = nextSnapshot.plasma;
++        }
+         if (!shallowEqual(signals.icon.peek(), nextSnapshot.icon)) {
+           signals.icon.value = nextSnapshot.icon;
+         }
+diff --git a/packages/shoji_wm/src/types.ts b/packages/shoji_wm/src/types.ts
+index c6529bc..847be97 100644
+--- a/packages/shoji_wm/src/types.ts
++++ b/packages/shoji_wm/src/types.ts
+@@ -18,6 +18,34 @@ export interface WaylandWindowSnapshot {
+   readonly interaction: WindowCompositionInteractionSnapshot;
+   /** Output whose frames drive this window's runtime work. / このウィンドウのランタイム処理を駆動する出力。 */
+   readonly outputName?: string;
++  /** What plasmashell asked for this window; absent without a plasma surface. */
++  readonly plasma?: PlasmaSurfaceState;
++}
++
++/** The `role` of KDE's `org_kde_plasma_surface.set_role`. */
++export type PlasmaSurfaceRole =
++  | "normal"
++  | "desktop"
++  | "panel"
++  | "onscreendisplay"
++  | "notification"
++  | "tooltip"
++  | "criticalnotification"
++  | "appletpopup";
++
++/**
++ * What plasmashell asked for one of its windows (Kickoff, tray popups, OSDs,
++ * notifications) through KDE's `org_kde_plasma_surface` protocol.
++ */
++export interface PlasmaSurfaceState {
++  readonly role: PlasmaSurfaceRole;
++  /** Global logical position from `set_position`, if the shell sent one. */
++  readonly x?: number;
++  readonly y?: number;
++  readonly skipTaskbar: boolean;
++  readonly skipSwitcher: boolean;
++  /** A panel that wants keyboard focus (e.g. for a search field). */
++  readonly panelTakesFocus: boolean;
+ }
+ 
+ export type WindowDecorationMode = "client" | "server";
+@@ -211,6 +239,11 @@ export interface WaylandWindow {
+   readonly isTransient: import("./signals").ReadonlySignal<boolean>;
+   /** `id` of the parent window if this is a transient, otherwise `undefined`. / トランジェントの場合は親ウィンドウの `id`、そうでない場合は `undefined`。 */
+   readonly parentId: import("./signals").ReadonlySignal<string | undefined>;
++  /**
++   * Role and position plasmashell asked for this window (KDE
++   * `org_kde_plasma_surface`); `undefined` for every other window.
++   */
++  readonly plasma: import("./signals").ReadonlySignal<PlasmaSurfaceState | undefined>;
+   /** Window icon provided by the client or resolved from the desktop entry. / クライアントまたはデスクトップエントリから提供されるウィンドウアイコン。 */
+   readonly icon: import("./signals").ReadonlySignal<WindowIcon | undefined>;
+   /** Current pointer/drag interaction state for use in composition code. / 合成コードで使用するポインター・ドラッグの現在のインタラクション状態。 */
+@@ -3226,6 +3259,7 @@ export interface ReactiveWaylandWindowSignals {
+   isResizable: import("./signals").ReadonlySignal<boolean>;
+   isTransient: import("./signals").ReadonlySignal<boolean>;
+   parentId: import("./signals").ReadonlySignal<string | undefined>;
++  plasma: import("./signals").ReadonlySignal<PlasmaSurfaceState | undefined>;
+   icon: import("./signals").ReadonlySignal<WindowIcon | undefined>;
+   interaction: import("./signals").ReadonlySignal<WindowCompositionInteractionSnapshot>;
+   output: import("./signals").ReadonlySignal<string | undefined>;
+diff --git a/src/shojiwm/src/evaluator.rs b/src/shojiwm/src/evaluator.rs
+index d8da8af..b2af521 100644
+--- a/src/shojiwm/src/evaluator.rs
++++ b/src/shojiwm/src/evaluator.rs
+@@ -4282,6 +4282,7 @@ mod tests {
+     fn make_window(is_focused: bool) -> WaylandWindowSnapshot {
+         WaylandWindowSnapshot {
+             output_name: None,
++            plasma: None,
+             id: "1".into(),
+             title: "Kitty".into(),
+             app_id: Some("kitty".into()),
+diff --git a/src/shojiwm/src/lib.rs b/src/shojiwm/src/lib.rs
+index d75ae63..f8c12d2 100644
+--- a/src/shojiwm/src/lib.rs
++++ b/src/shojiwm/src/lib.rs
+@@ -294,6 +294,7 @@ COMPOSITOR.window.composition = (window) => <Label text={{window.title}} />;
+ 
+         let window = shojiwm_lib::ssd::WaylandWindowSnapshot {
+             output_name: None,
++            plasma: None,
+             id: "w1".into(),
+             title: "hello".into(),
+             app_id: Some("test".into()),
+@@ -567,6 +568,7 @@ COMPOSITOR.window.composition = (window) => <Label text={window.title} />;
+             RuntimeHandle::new("none", Box::new(NullRuntime), RuntimeHost::detached());
+         let window = shojiwm_lib::ssd::WaylandWindowSnapshot {
+             output_name: None,
++            plasma: None,
+             id: "w1".into(),
+             title: "hello".into(),
+             app_id: None,
+diff --git a/src/shojiwm_lib/Cargo.toml b/src/shojiwm_lib/Cargo.toml
+index 623e7eb..5e2085a 100644
+--- a/src/shojiwm_lib/Cargo.toml
++++ b/src/shojiwm_lib/Cargo.toml
+@@ -27,6 +27,9 @@ satellite = {
+ }
+ wayland-protocols = { version = "0.32.12", features = ["server", "staging"] }
+ wayland-protocols-wlr = { version = "0.3.12", features = ["server"] }
++# KDE-private protocols that plasmashell needs (taskbar window list, popup
++# placement); see `plasma_window_management.rs` and `protocols/plasma_shell.rs`.
++wayland-protocols-plasma = { version = "0.3.12", features = ["server"] }
+ wayland-server = { version = "0.31.13", features = ["libwayland_1_23"] }
+ # Protocols no published crate covers (`protocols/*.xml`).
+ wayland-scanner = "0.31.10"
+diff --git a/src/shojiwm_lib/src/foreign_toplevel.rs b/src/shojiwm_lib/src/foreign_toplevel.rs
+index 4202747..742ab76 100644
+--- a/src/shojiwm_lib/src/foreign_toplevel.rs
++++ b/src/shojiwm_lib/src/foreign_toplevel.rs
+@@ -4,6 +4,10 @@
+ //! Each mapped window holds at most one [`ForeignToplevelHandle`] in its
+ //! `Window::user_data()`. The handle is created on first map, updated when
+ //! title or app_id changes, and removed on destroy/unmap.
++//!
++//! The same three calls also drive the other taskbar protocols:
++//! `zwlr_foreign_toplevel_manager_v1` (`wlr_foreign_toplevel.rs`) and KDE's
++//! `org_kde_plasma_window_management` (`plasma_window_management.rs`).
+ 
+ use smithay::desktop::Window;
+ use smithay::wayland::compositor::with_states;
+@@ -52,6 +56,7 @@ impl ShojiWM {
+         handle.send_done();
+         window.user_data().insert_if_missing(|| handle);
+         self.install_wlr_foreign_toplevel(window, &title, &app_id);
++        self.install_plasma_window(window);
+     }
+ 
+     /// Re-read title/app_id from the window and push any changes to the
+@@ -66,6 +71,7 @@ impl ShojiWM {
+         let app_id_changed = handle.app_id() != app_id;
+         if !title_changed && !app_id_changed {
+             self.sync_wlr_foreign_toplevel(window, &title, &app_id);
++            self.sync_plasma_window(window);
+             return;
+         }
+         if title_changed {
+@@ -76,6 +82,14 @@ impl ShojiWM {
+         }
+         handle.send_done();
+         self.sync_wlr_foreign_toplevel(window, &title, &app_id);
++        self.sync_plasma_window(window);
++    }
++
++    /// Push focus, minimize and geometry changes of every window to all
++    /// taskbar protocols.
++    pub fn sync_taskbar_window_states(&mut self) {
++        self.sync_wlr_foreign_toplevel_states();
++        self.sync_plasma_window_states();
+     }
+ 
+     /// Announce the toplevel as closed and drop our reference. Safe to call
+@@ -86,6 +100,7 @@ impl ShojiWM {
+         };
+         self.foreign_toplevel_list_state.remove_toplevel(&handle);
+         self.remove_wlr_foreign_toplevel(window);
++        self.remove_plasma_window(window);
+         // We can't remove from UserDataMap, but the handle is now inert so
+         // subsequent sync_foreign_toplevel calls are harmless no-ops.
+         let _ = window;
+diff --git a/src/shojiwm_lib/src/input.rs b/src/shojiwm_lib/src/input.rs
+index ffcf9ee..08112c4 100644
+--- a/src/shojiwm_lib/src/input.rs
++++ b/src/shojiwm_lib/src/input.rs
+@@ -3467,7 +3467,7 @@ impl ShojiWM {
+         self.set_window_keyboard_focus_target_surface(window, surface);
+         self.focus_layer_surface_if_on_demand(None);
+         self.update_keyboard_focus(serial);
+-        self.sync_wlr_foreign_toplevel_states();
++        self.sync_taskbar_window_states();
+         debug!(
+             window_id,
+             focus_surface_id = surface.map(|surface| surface.id().protocol_id()),
+diff --git a/src/shojiwm_lib/src/lib.rs b/src/shojiwm_lib/src/lib.rs
+index 75b398e..55aa5d9 100644
+--- a/src/shojiwm_lib/src/lib.rs
++++ b/src/shojiwm_lib/src/lib.rs
+@@ -47,6 +47,7 @@ pub mod handlers;
+ pub mod input;
+ pub mod keyboard_layout;
+ pub mod output_power;
++pub mod plasma_window_management;
+ pub mod presentation;
+ pub mod presentation_test_client;
+ pub mod process_env;
+diff --git a/src/shojiwm_lib/src/plasma_window_management.rs b/src/shojiwm_lib/src/plasma_window_management.rs
+new file mode 100644
+index 0000000..917ee37
+--- /dev/null
++++ b/src/shojiwm_lib/src/plasma_window_management.rs
+@@ -0,0 +1,637 @@
++//! `org_kde_plasma_window_management` server (KDE's plasma-window-management.xml).
++//!
++//! KDE's task manager library (libtaskmanager, behind plasmashell's taskbar)
++//! lists windows only through this protocol. Without it the taskbar stays
++//! empty and plasmashell logs "The PlasmaWindowManagement protocol hasn't
++//! activated in time".
++//!
++//! It is a close cousin of `zwlr_foreign_toplevel_manager_v1`
++//! (`wlr_foreign_toplevel.rs`) and follows the same life cycle: a handle is
++//! made when a window maps, kept in sync, and closed when the window goes.
++//!
++//! The protocol works in two steps:
++//!
++//! ```text
++//!   window maps ──> manager.window_with_uuid(uuid)
++//!                       │
++//!   client:  manager.get_window_by_uuid(uuid) ──> new org_kde_plasma_window
++//!                       │
++//!   server:  title, app_id, pid, state, geometry ... initial_state
++//!   later:   *_changed events, and `unmapped` when the window closes
++//! ```
++//!
++//! Taskbar requests (activate, minimize, maximize, close) go through the same
++//! runtime events as a wlr taskbar click, so the TypeScript window manager
++//! stays the owner of window state.
++
++use std::sync::{Arc, Mutex};
++
++use smithay::{
++    desktop::Window,
++    reexports::wayland_server::{
++        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
++        Weak as WaylandWeak, backend::ClientId,
++    },
++};
++use wayland_protocols_plasma::plasma_window_management::server::{
++    org_kde_plasma_stacking_order::OrgKdePlasmaStackingOrder,
++    org_kde_plasma_window::{self, OrgKdePlasmaWindow},
++    org_kde_plasma_window_management::{self, OrgKdePlasmaWindowManagement},
++};
++
++use crate::state::ShojiWM;
++
++/// KWin's version. libtaskmanager in Plasma 6 asks for 17+ (it uses
++/// `get_stacking_order`); 18 only adds the `client_geometry` event.
++const VERSION: u32 = 18;
++
++/// Bits of the protocol's `state` enum.
++mod flag {
++    pub const ACTIVE: u32 = 0x1;
++    pub const MINIMIZED: u32 = 0x2;
++    pub const MAXIMIZED: u32 = 0x4;
++    pub const FULLSCREEN: u32 = 0x8;
++    pub const ON_ALL_DESKTOPS: u32 = 0x40;
++    pub const CLOSEABLE: u32 = 0x100;
++    pub const MINIMIZABLE: u32 = 0x200;
++    pub const MAXIMIZABLE: u32 = 0x400;
++    pub const FULLSCREENABLE: u32 = 0x800;
++    pub const SKIP_TASKBAR: u32 = 0x1000;
++    pub const MOVABLE: u32 = 0x8000;
++    pub const RESIZABLE: u32 = 0x10000;
++    pub const SKIP_SWITCHER: u32 = 0x40000;
++}
++
++/// A rect in global logical coordinates: x, y, width, height.
++type Rect = (i32, i32, i32, i32);
++
++/// The window properties the protocol carries.
++#[derive(Debug, Clone, Default, PartialEq, Eq)]
++struct PlasmaWindowInfo {
++    title: String,
++    app_id: String,
++    pid: u32,
++    /// Bitfield of [`flag`] values.
++    flags: u32,
++    /// The whole window, decorations included (`geometry`).
++    geometry: Rect,
++    /// The client area only (`client_geometry`, version 18).
++    client_geometry: Rect,
++}
++
++/// One window as the protocol sees it. Lives in the window's user data.
++#[derive(Clone)]
++pub struct PlasmaWindowHandle {
++    inner: Arc<Mutex<PlasmaWindowInner>>,
++}
++
++struct PlasmaWindowInner {
++    /// The deprecated numeric id, still sent in `window_with_uuid`.
++    internal_id: u32,
++    uuid: String,
++    /// What the clients were last told.
++    info: PlasmaWindowInfo,
++    closed: bool,
++    resources: Vec<WaylandWeak<OrgKdePlasmaWindow>>,
++}
++
++impl PlasmaWindowHandle {
++    fn new(internal_id: u32, uuid: String) -> Self {
++        Self {
++            inner: Arc::new(Mutex::new(PlasmaWindowInner {
++                internal_id,
++                uuid,
++                info: PlasmaWindowInfo::default(),
++                closed: false,
++                resources: Vec::new(),
++            })),
++        }
++    }
++
++    /// A handle for a uuid nobody knows: its window objects only ever get
++    /// `unmapped`.
++    fn closed_placeholder() -> Self {
++        let handle = Self::new(0, String::new());
++        handle.inner.lock().unwrap().closed = true;
++        handle
++    }
++
++    fn internal_id(&self) -> u32 {
++        self.inner.lock().unwrap().internal_id
++    }
++
++    fn uuid(&self) -> String {
++        self.inner.lock().unwrap().uuid.clone()
++    }
++
++    fn is_closed(&self) -> bool {
++        self.inner.lock().unwrap().closed
++    }
++
++    fn same_as(&self, other: &Self) -> bool {
++        Arc::ptr_eq(&self.inner, &other.inner)
++    }
++
++    /// True when some client holds a window object for this window, so
++    /// changes must be sent.
++    fn has_resources(&self) -> bool {
++        let mut inner = self.inner.lock().unwrap();
++        inner.resources.retain(|resource| resource.upgrade().is_ok());
++        !inner.resources.is_empty()
++    }
++
++    /// Send the full state to a new window object and keep it for updates.
++    fn add_resource(&self, resource: OrgKdePlasmaWindow, info: PlasmaWindowInfo) {
++        let mut inner = self.inner.lock().unwrap();
++        if inner.closed {
++            resource.unmapped();
++            return;
++        }
++        send_title(&resource, &info);
++        send_app_id(&resource, &info);
++        resource.pid_changed(info.pid);
++        resource.state_changed(info.flags);
++        send_geometry(&resource, &info);
++        send_client_geometry(&resource, &info);
++        if resource.version() >= 4 {
++            resource.initial_state();
++        }
++        // Other window objects must not miss a change because the new info
++        // replaced theirs: tell them first.
++        send_changes(&live_resources(&inner), &inner.info, &info);
++        inner.info = info;
++        inner.resources.push(resource.downgrade());
++    }
++
++    /// Send what changed since the last update to every window object.
++    fn update(&self, info: PlasmaWindowInfo) {
++        let mut inner = self.inner.lock().unwrap();
++        if inner.closed || inner.info == info {
++            return;
++        }
++        send_changes(&live_resources(&inner), &inner.info, &info);
++        inner.info = info;
++    }
++
++    fn close(&self) {
++        let resources = {
++            let mut inner = self.inner.lock().unwrap();
++            if inner.closed {
++                return;
++            }
++            inner.closed = true;
++            let resources = live_resources(&inner);
++            inner.resources.clear();
++            resources
++        };
++        for resource in resources {
++            resource.unmapped();
++        }
++    }
++
++    fn remove_resource(&self, resource: &OrgKdePlasmaWindow) {
++        self.inner.lock().unwrap().resources.retain(|candidate| {
++            candidate
++                .upgrade()
++                .is_ok_and(|candidate| candidate != *resource)
++        });
++    }
++}
++
++fn live_resources(inner: &PlasmaWindowInner) -> Vec<OrgKdePlasmaWindow> {
++    inner
++        .resources
++        .iter()
++        .filter_map(|resource| resource.upgrade().ok())
++        .collect()
++}
++
++fn send_title(resource: &OrgKdePlasmaWindow, info: &PlasmaWindowInfo) {
++    resource.title_changed(info.title.clone());
++}
++
++fn send_app_id(resource: &OrgKdePlasmaWindow, info: &PlasmaWindowInfo) {
++    resource.app_id_changed(info.app_id.clone());
++}
++
++fn send_geometry(resource: &OrgKdePlasmaWindow, info: &PlasmaWindowInfo) {
++    if resource.version() >= 6 {
++        let (x, y, width, height) = info.geometry;
++        resource.geometry(x, y, width.max(0) as u32, height.max(0) as u32);
++    }
++}
++
++fn send_client_geometry(resource: &OrgKdePlasmaWindow, info: &PlasmaWindowInfo) {
++    if resource.version() >= 18 {
++        let (x, y, width, height) = info.client_geometry;
++        resource.client_geometry(x, y, width.max(0) as u32, height.max(0) as u32);
++    }
++}
++
++fn send_changes(resources: &[OrgKdePlasmaWindow], old: &PlasmaWindowInfo, new: &PlasmaWindowInfo) {
++    for resource in resources {
++        if old.title != new.title {
++            send_title(resource, new);
++        }
++        if old.app_id != new.app_id {
++            send_app_id(resource, new);
++        }
++        if old.pid != new.pid {
++            resource.pid_changed(new.pid);
++        }
++        if old.flags != new.flags {
++            resource.state_changed(new.flags);
++        }
++        if old.geometry != new.geometry {
++            send_geometry(resource, new);
++        }
++        if old.client_geometry != new.client_geometry {
++            send_client_geometry(resource, new);
++        }
++    }
++}
++
++pub struct PlasmaWindowManagementState {
++    managers: Vec<OrgKdePlasmaWindowManagement>,
++    /// Live windows, oldest first. This is also the stacking order the
++    /// clients get: ShojiWM's real stacking lives in the TypeScript config.
++    handles: Vec<PlasmaWindowHandle>,
++    next_internal_id: u32,
++}
++
++impl PlasmaWindowManagementState {
++    pub fn new(display: &DisplayHandle) -> Self {
++        display.create_global::<ShojiWM, OrgKdePlasmaWindowManagement, _>(VERSION, ());
++        Self {
++            managers: Vec::new(),
++            handles: Vec::new(),
++            next_internal_id: 1,
++        }
++    }
++
++    fn announce(manager: &OrgKdePlasmaWindowManagement, handle: &PlasmaWindowHandle) {
++        if manager.version() >= 13 {
++            manager.window_with_uuid(handle.internal_id(), handle.uuid());
++        } else {
++            manager.window(handle.internal_id());
++        }
++    }
++
++    /// Tell `manager` the stacking order changed, in the newest form it
++    /// understands.
++    fn send_stacking_order(&self, manager: &OrgKdePlasmaWindowManagement) {
++        let version = manager.version();
++        if version >= 17 {
++            // The client fetches the list itself with `get_stacking_order`.
++            manager.stacking_order_changed_2();
++        } else if version >= 12 {
++            let uuids: Vec<String> = self.handles.iter().map(PlasmaWindowHandle::uuid).collect();
++            manager.stacking_order_uuid_changed(uuids.join(";"));
++        } else if version >= 11 {
++            let ids: Vec<u8> = self
++                .handles
++                .iter()
++                .flat_map(|handle| handle.internal_id().to_ne_bytes())
++                .collect();
++            manager.stacking_order_changed(ids);
++        }
++    }
++
++    fn windows_changed(&self) {
++        for manager in &self.managers {
++            self.send_stacking_order(manager);
++        }
++    }
++
++    fn find_handle(&self, matches: impl Fn(&PlasmaWindowHandle) -> bool) -> Option<PlasmaWindowHandle> {
++        self.handles
++            .iter()
++            .find(|handle| !handle.is_closed() && matches(handle))
++            .cloned()
++    }
++}
++
++impl ShojiWM {
++    /// Announce a newly mapped window. Extra calls are no-ops.
++    pub fn install_plasma_window(&mut self, window: &Window) {
++        if window.user_data().get::<PlasmaWindowHandle>().is_some() {
++            return;
++        }
++        let uuid = self.snapshot_window(window).id;
++        let state = &mut self.plasma_window_management_state;
++        let handle = PlasmaWindowHandle::new(state.next_internal_id, uuid);
++        state.next_internal_id = state.next_internal_id.wrapping_add(1).max(1);
++        state.handles.push(handle.clone());
++        for manager in &state.managers {
++            PlasmaWindowManagementState::announce(manager, &handle);
++        }
++        state.windows_changed();
++        window.user_data().insert_if_missing(|| handle);
++    }
++
++    /// Send the window's current title, state and geometry to the clients
++    /// that hold it. Cheap when nobody does.
++    pub fn sync_plasma_window(&mut self, window: &Window) {
++        let Some(handle) = window.user_data().get::<PlasmaWindowHandle>().cloned() else {
++            return;
++        };
++        if !handle.has_resources() {
++            return;
++        }
++        handle.update(self.plasma_window_info(window));
++    }
++
++    /// [`Self::sync_plasma_window`] for every window: focus, minimize and
++    /// geometry changes land here.
++    pub fn sync_plasma_window_states(&mut self) {
++        if self.plasma_window_management_state.handles.is_empty() {
++            return;
++        }
++        let windows: Vec<Window> = self.space.elements().cloned().collect();
++        for window in windows {
++            self.sync_plasma_window(&window);
++        }
++    }
++
++    /// Send `unmapped` and forget the window.
++    pub fn remove_plasma_window(&mut self, window: &Window) {
++        let Some(handle) = window.user_data().get::<PlasmaWindowHandle>().cloned() else {
++            return;
++        };
++        handle.close();
++        let state = &mut self.plasma_window_management_state;
++        let count = state.handles.len();
++        state.handles.retain(|candidate| !candidate.same_as(&handle));
++        if state.handles.len() != count {
++            state.windows_changed();
++        }
++    }
++
++    fn plasma_window_for_handle(&self, handle: &PlasmaWindowHandle) -> Option<Window> {
++        self.space
++            .elements()
++            .find(|window| {
++                window
++                    .user_data()
++                    .get::<PlasmaWindowHandle>()
++                    .is_some_and(|candidate| candidate.same_as(handle))
++            })
++            .cloned()
++    }
++
++    fn plasma_window_info(&self, window: &Window) -> PlasmaWindowInfo {
++        let snapshot = self.snapshot_window(window);
++        // Same rule as the wlr taskbar: an idle window is minimized (or on
++        // another workspace, which a taskbar shows the same way).
++        let minimized = self
++            .window_decorations
++            .get(window)
++            .is_some_and(|decoration| decoration.managed_window.idle);
++        let shell_window = snapshot
++            .plasma
++            .as_ref()
++            .is_some_and(|plasma| plasma.is_shell_window());
++
++        // ShojiWM has no virtual desktops, so every window is on all of them.
++        let mut flags = flag::ON_ALL_DESKTOPS;
++        let mut set = |bit: u32, on: bool| {
++            if on {
++                flags |= bit;
++            }
++        };
++        set(flag::ACTIVE, snapshot.is_focused);
++        set(flag::MINIMIZED, minimized);
++        set(flag::MAXIMIZED, snapshot.is_maximized);
++        set(flag::FULLSCREEN, snapshot.is_fullscreen);
++        if shell_window {
++            // plasmashell's own popups, panels and notifications.
++            set(flag::SKIP_TASKBAR | flag::SKIP_SWITCHER, true);
++        } else {
++            set(
++                flag::CLOSEABLE
++                    | flag::MINIMIZABLE
++                    | flag::MAXIMIZABLE
++                    | flag::FULLSCREENABLE
++                    | flag::MOVABLE,
++                true,
++            );
++            set(flag::RESIZABLE, snapshot.is_resizable);
++            if let Some(plasma) = snapshot.plasma.as_ref() {
++                set(flag::SKIP_TASKBAR, plasma.skip_taskbar);
++                set(flag::SKIP_SWITCHER, plasma.skip_switcher);
++            }
++        }
++
++        let rect = |r: &crate::ssd::WindowPositionSnapshot| -> Rect {
++            (
++                r.x.round() as i32,
++                r.y.round() as i32,
++                r.width.round() as i32,
++                r.height.round() as i32,
++            )
++        };
++        PlasmaWindowInfo {
++            title: snapshot.title.clone(),
++            app_id: snapshot.app_id.clone().unwrap_or_default(),
++            pid: self.window_pid(window),
++            flags,
++            geometry: rect(&snapshot.rect),
++            client_geometry: rect(&snapshot.position),
++        }
++    }
++
++    /// The process id of the window's client, or 0 when unknown.
++    fn window_pid(&self, window: &Window) -> u32 {
++        if let Some(x11) = window.x11_surface() {
++            return x11.pid().unwrap_or(0);
++        }
++        window
++            .toplevel()
++            .and_then(|toplevel| toplevel.wl_surface().client())
++            .and_then(|client| client.get_credentials(&self.display_handle).ok())
++            .map(|credentials| credentials.pid.max(0) as u32)
++            .unwrap_or(0)
++    }
++
++    /// `set_state`: each bit in `changed` is a state the client wants set
++    /// (bit also in `state`) or cleared.
++    fn plasma_window_set_state(&mut self, window: &Window, changed: u32, state: u32) {
++        let wants = |bit: u32| state & bit != 0;
++        let api = crate::ssd::WindowStateRequestSourceSnapshot::Api;
++        if changed & flag::MINIMIZED != 0 {
++            self.minimize_window_from_taskbar(window, wants(flag::MINIMIZED));
++        }
++        if changed & flag::MAXIMIZED != 0 {
++            self.request_window_maximize(window, wants(flag::MAXIMIZED), api);
++        }
++        if changed & flag::FULLSCREEN != 0 {
++            self.request_window_fullscreen(window, wants(flag::FULLSCREEN), None, api);
++        }
++        // Activate last: a task-bar click on a minimized window sends
++        // "unminimize + activate" in one request.
++        if changed & flag::ACTIVE != 0 && wants(flag::ACTIVE) {
++            self.activate_window_from_taskbar(window);
++        }
++        self.sync_taskbar_window_states();
++    }
++}
++
++impl GlobalDispatch<OrgKdePlasmaWindowManagement, ()> for ShojiWM {
++    fn bind(
++        state: &mut Self,
++        _dh: &DisplayHandle,
++        _client: &Client,
++        resource: New<OrgKdePlasmaWindowManagement>,
++        _global_data: &(),
++        data_init: &mut DataInit<'_, Self>,
++    ) {
++        let manager = data_init.init(resource, ());
++        // ShojiWM has no "show desktop" mode.
++        manager.show_desktop_changed(0);
++        let state = &mut state.plasma_window_management_state;
++        for handle in &state.handles {
++            PlasmaWindowManagementState::announce(&manager, handle);
++        }
++        state.send_stacking_order(&manager);
++        state.managers.push(manager);
++    }
++}
++
++impl Dispatch<OrgKdePlasmaWindowManagement, ()> for ShojiWM {
++    fn request(
++        state: &mut Self,
++        _client: &Client,
++        _manager: &OrgKdePlasmaWindowManagement,
++        request: org_kde_plasma_window_management::Request,
++        _data: &(),
++        _dh: &DisplayHandle,
++        data_init: &mut DataInit<'_, Self>,
++    ) {
++        use org_kde_plasma_window_management::Request;
++        match request {
++            Request::GetWindow { id, internal_window_id } => {
++                let handle = state
++                    .plasma_window_management_state
++                    .find_handle(|handle| handle.internal_id() == internal_window_id);
++                state.init_plasma_window(id, handle, data_init);
++            }
++            Request::GetWindowByUuid { id, internal_window_uuid } => {
++                let handle = state
++                    .plasma_window_management_state
++                    .find_handle(|handle| handle.uuid() == internal_window_uuid);
++                state.init_plasma_window(id, handle, data_init);
++            }
++            Request::GetStackingOrder { stacking_order } => {
++                let order = data_init.init(stacking_order, ());
++                let uuids: Vec<String> = state
++                    .plasma_window_management_state
++                    .handles
++                    .iter()
++                    .map(PlasmaWindowHandle::uuid)
++                    .collect();
++                // `done` is a destructor event. Send it after this dispatch,
++                // never inside the dispatch that created the object (see
++                // `defer_image_description_info` for the crash this avoids).
++                state.loop_handle.insert_idle(move |_state| {
++                    for uuid in uuids {
++                        order.window(uuid);
++                    }
++                    order.done();
++                });
++            }
++            // "Show desktop" (minimize everything) is not supported.
++            Request::ShowDesktop { .. } => {}
++            _ => {}
++        }
++    }
++
++    fn destroyed(
++        state: &mut Self,
++        _client: ClientId,
++        resource: &OrgKdePlasmaWindowManagement,
++        _data: &(),
++    ) {
++        state
++            .plasma_window_management_state
++            .managers
++            .retain(|manager| manager != resource);
++    }
++}
++
++impl ShojiWM {
++    fn init_plasma_window(
++        &mut self,
++        id: New<OrgKdePlasmaWindow>,
++        handle: Option<PlasmaWindowHandle>,
++        data_init: &mut DataInit<'_, Self>,
++    ) {
++        let window = handle
++            .as_ref()
++            .and_then(|handle| self.plasma_window_for_handle(handle));
++        let (Some(handle), Some(window)) = (handle, window) else {
++            // Unknown or already closed: the protocol says to answer with
++            // `unmapped` right away.
++            let resource = data_init.init(id, PlasmaWindowHandle::closed_placeholder());
++            resource.unmapped();
++            return;
++        };
++        let resource = data_init.init(id, handle.clone());
++        handle.add_resource(resource, self.plasma_window_info(&window));
++    }
++}
++
++impl Dispatch<OrgKdePlasmaStackingOrder, ()> for ShojiWM {
++    fn request(
++        _state: &mut Self,
++        _client: &Client,
++        _resource: &OrgKdePlasmaStackingOrder,
++        _request: <OrgKdePlasmaStackingOrder as Resource>::Request,
++        _data: &(),
++        _dh: &DisplayHandle,
++        _data_init: &mut DataInit<'_, Self>,
++    ) {
++        // The interface has no requests.
++    }
++}
++
++impl Dispatch<OrgKdePlasmaWindow, PlasmaWindowHandle> for ShojiWM {
++    fn request(
++        state: &mut Self,
++        _client: &Client,
++        _resource: &OrgKdePlasmaWindow,
++        request: org_kde_plasma_window::Request,
++        handle: &PlasmaWindowHandle,
++        _dh: &DisplayHandle,
++        _data_init: &mut DataInit<'_, Self>,
++    ) {
++        use org_kde_plasma_window::Request;
++        if handle.is_closed() {
++            return;
++        }
++        let Some(window) = state.plasma_window_for_handle(handle) else {
++            return;
++        };
++        match request {
++            Request::SetState { flags, state: wanted } => {
++                state.plasma_window_set_state(&window, flags, wanted);
++            }
++            Request::Close => state.close_window_from_taskbar(&window),
++            // No icon bytes: dropping the fd closes it, so the client reads
++            // an empty icon and falls back to the app's .desktop icon.
++            Request::GetIcon { fd } => drop(fd),
++            // Not supported: virtual desktops, activities, highlight,
++            // minimized geometries (for the minimize animation),
++            // interactive move/resize, send to output.
++            _ => {}
++        }
++    }
++
++    fn destroyed(
++        _state: &mut Self,
++        _client: ClientId,
++        resource: &OrgKdePlasmaWindow,
++        handle: &PlasmaWindowHandle,
++    ) {
++        handle.remove_resource(resource);
++    }
++}
+diff --git a/src/shojiwm_lib/src/protocols/mod.rs b/src/shojiwm_lib/src/protocols/mod.rs
+index 02aca8d..42c85fe 100644
+--- a/src/shojiwm_lib/src/protocols/mod.rs
++++ b/src/shojiwm_lib/src/protocols/mod.rs
+@@ -3,3 +3,4 @@ pub mod screencopy;
+ pub mod tearing_control;
+ pub mod color_management;
+ pub mod hyprland_toplevel_export;
++pub mod plasma_shell;
+diff --git a/src/shojiwm_lib/src/protocols/plasma_shell.rs b/src/shojiwm_lib/src/protocols/plasma_shell.rs
+new file mode 100644
+index 0000000..a21a78f
+--- /dev/null
++++ b/src/shojiwm_lib/src/protocols/plasma_shell.rs
+@@ -0,0 +1,240 @@
++//! `org_kde_plasma_shell` server (KDE's plasma-shell.xml).
++//!
++//! plasmashell gives each of its own windows (Kickoff, tray popups, the
++//! calendar, OSDs, notifications, tooltips) a `org_kde_plasma_surface`. On it
++//! the shell says what the window is (`set_role`) and where it must appear in
++//! global coordinates (`set_position`).
++//!
++//! This module only records those requests in the surface's data map. The
++//! window snapshot carries them to the TypeScript config as `window.plasma`,
++//! and the config decides what to do: place the window, skip tiling and
++//! decorations, keep it above normal windows.
++
++use std::sync::Mutex;
++
++use serde::Serialize;
++use smithay::reexports::wayland_server::{
++    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
++    protocol::wl_surface::WlSurface,
++};
++use smithay::wayland::compositor::with_states;
++use wayland_protocols_plasma::plasma_shell::server::{
++    org_kde_plasma_shell::{self, OrgKdePlasmaShell},
++    org_kde_plasma_surface::{self, OrgKdePlasmaSurface},
++};
++
++use crate::state::ShojiWM;
++
++/// KWin advertises 8 too: every request up to `open_under_cursor`.
++const VERSION: u32 = 8;
++
++/// What a plasma surface is, from `org_kde_plasma_surface.set_role`.
++#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
++#[serde(rename_all = "lowercase")]
++pub enum PlasmaRole {
++    #[default]
++    Normal,
++    Desktop,
++    Panel,
++    OnScreenDisplay,
++    Notification,
++    Tooltip,
++    CriticalNotification,
++    AppletPopup,
++}
++
++impl PlasmaRole {
++    /// Map the wire value of the `role` enum. Unknown values count as normal.
++    fn from_wire(value: u32) -> Self {
++        match value {
++            1 => Self::Desktop,
++            2 => Self::Panel,
++            3 => Self::OnScreenDisplay,
++            4 => Self::Notification,
++            5 => Self::Tooltip,
++            6 => Self::CriticalNotification,
++            7 => Self::AppletPopup,
++            _ => Self::Normal,
++        }
++    }
++}
++
++/// Everything plasmashell asked for one surface. Lives in the surface's
++/// data map, so it exists before and after the window is known.
++#[derive(Debug, Clone, Default)]
++struct PlasmaSurfaceData {
++    role: PlasmaRole,
++    /// Global logical position from `set_position` or `open_under_cursor`.
++    position: Option<(i32, i32)>,
++    skip_taskbar: bool,
++    skip_switcher: bool,
++    panel_takes_focus: bool,
++}
++
++/// The TypeScript view of [`PlasmaSurfaceData`] (`window.plasma`). Flat on
++/// purpose: the TS side compares it with a shallow equality check.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct PlasmaSurfaceSnapshot {
++    pub role: PlasmaRole,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub x: Option<i32>,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub y: Option<i32>,
++    pub skip_taskbar: bool,
++    pub skip_switcher: bool,
++    pub panel_takes_focus: bool,
++}
++
++impl PlasmaSurfaceSnapshot {
++    /// Windows with a role other than `normal` belong to the shell: no
++    /// taskbar entry, no window switcher, no tiling.
++    pub fn is_shell_window(&self) -> bool {
++        self.role != PlasmaRole::Normal
++    }
++}
++
++/// The plasma surface state of `surface`, or `None` when plasmashell never
++/// called `get_surface` for it.
++pub fn plasma_surface_snapshot(surface: &WlSurface) -> Option<PlasmaSurfaceSnapshot> {
++    with_states(surface, |states| {
++        let data = states.data_map.get::<Mutex<PlasmaSurfaceData>>()?;
++        let data = data.lock().unwrap();
++        Some(PlasmaSurfaceSnapshot {
++            role: data.role,
++            x: data.position.map(|(x, _)| x),
++            y: data.position.map(|(_, y)| y),
++            skip_taskbar: data.skip_taskbar,
++            skip_switcher: data.skip_switcher,
++            panel_takes_focus: data.panel_takes_focus,
++        })
++    })
++}
++
++fn update_surface_data(surface: &WlSurface, update: impl FnOnce(&mut PlasmaSurfaceData)) {
++    with_states(surface, |states| {
++        states
++            .data_map
++            .insert_if_missing_threadsafe(|| Mutex::new(PlasmaSurfaceData::default()));
++        let data = states.data_map.get::<Mutex<PlasmaSurfaceData>>().unwrap();
++        update(&mut data.lock().unwrap());
++    });
++}
++
++pub struct PlasmaShellState;
++
++impl PlasmaShellState {
++    pub fn new(display: &DisplayHandle) -> Self {
++        display.create_global::<ShojiWM, OrgKdePlasmaShell, _>(VERSION, ());
++        Self
++    }
++}
++
++impl GlobalDispatch<OrgKdePlasmaShell, ()> for ShojiWM {
++    fn bind(
++        _state: &mut Self,
++        _dh: &DisplayHandle,
++        _client: &Client,
++        resource: New<OrgKdePlasmaShell>,
++        _global_data: &(),
++        data_init: &mut DataInit<'_, Self>,
++    ) {
++        data_init.init(resource, ());
++    }
++}
++
++impl Dispatch<OrgKdePlasmaShell, ()> for ShojiWM {
++    fn request(
++        _state: &mut Self,
++        _client: &Client,
++        _resource: &OrgKdePlasmaShell,
++        request: org_kde_plasma_shell::Request,
++        _data: &(),
++        _dh: &DisplayHandle,
++        data_init: &mut DataInit<'_, Self>,
++    ) {
++        if let org_kde_plasma_shell::Request::GetSurface { id, surface } = request {
++            update_surface_data(&surface, |_| {});
++            data_init.init(id, surface);
++        }
++    }
++}
++
++impl Dispatch<OrgKdePlasmaSurface, WlSurface> for ShojiWM {
++    fn request(
++        state: &mut Self,
++        _client: &Client,
++        resource: &OrgKdePlasmaSurface,
++        request: org_kde_plasma_surface::Request,
++        surface: &WlSurface,
++        _dh: &DisplayHandle,
++        _data_init: &mut DataInit<'_, Self>,
++    ) {
++        use org_kde_plasma_surface::Request;
++        match request {
++            Request::SetPosition { x, y } => {
++                update_surface_data(surface, |data| data.position = Some((x, y)));
++            }
++            Request::OpenUnderCursor => {
++                let pointer = state.seat.get_pointer().map(|p| p.current_location());
++                if let Some(location) = pointer {
++                    let position = (location.x.round() as i32, location.y.round() as i32);
++                    update_surface_data(surface, |data| data.position = Some(position));
++                }
++            }
++            Request::SetRole { role } => {
++                update_surface_data(surface, |data| data.role = PlasmaRole::from_wire(role));
++            }
++            Request::SetSkipTaskbar { skip } => {
++                update_surface_data(surface, |data| data.skip_taskbar = skip != 0);
++            }
++            Request::SetSkipSwitcher { skip } => {
++                update_surface_data(surface, |data| data.skip_switcher = skip != 0);
++            }
++            Request::SetPanelTakesFocus { takes_focus } => {
++                update_surface_data(surface, |data| data.panel_takes_focus = takes_focus != 0);
++            }
++            // ShojiWM does not hide panels itself. Confirm at once so an
++            // auto-hide panel does not wait for an answer that never comes.
++            Request::PanelAutoHideHide => resource.auto_hidden_panel_hidden(),
++            Request::PanelAutoHideShow => resource.auto_hidden_panel_shown(),
++            // set_output (no-op in KWin too), set_panel_behavior, destroy.
++            _ => return,
++        }
++        state.plasma_surface_changed(surface);
++    }
++}
++
++impl ShojiWM {
++    /// A plasma surface request changed what the config must know about the
++    /// window of `surface`: hand the window back to the runtime and update
++    /// the taskbar flags.
++    fn plasma_surface_changed(&mut self, surface: &WlSurface) {
++        let Some(window) = self
++            .space
++            .elements()
++            .find(|window| Self::window_matches_root_surface(window, surface))
++            .cloned()
++        else {
++            // Not a toplevel (yet), e.g. a layer-shell panel. The state waits
++            // in the surface's data map until a snapshot reads it.
++            return;
++        };
++        let window_id = self.snapshot_window(&window).id;
++        tracing::debug!(
++            window_id,
++            surface = ?surface.id(),
++            plasma = ?plasma_surface_snapshot(surface),
++            "plasma surface changed"
++        );
++        self.runtime_dirty_window_ids.insert(window_id.clone());
++        self.runtime_managed_only_window_ids.remove(&window_id);
++        self.runtime_node_only_window_ids.remove(&window_id);
++        self.runtime_poll_dirty = true;
++        self.request_tty_maintenance("plasma-surface-changed");
++        self.schedule_redraw();
++        // The decoration policy may depend on the role (shell windows get none).
++        self.mark_window_decoration_metadata_changed(surface);
++        self.sync_plasma_window(&window);
++    }
++}
+diff --git a/src/shojiwm_lib/src/ssd/integration.rs b/src/shojiwm_lib/src/ssd/integration.rs
+index 9124dcd..9211a27 100644
+--- a/src/shojiwm_lib/src/ssd/integration.rs
++++ b/src/shojiwm_lib/src/ssd/integration.rs
+@@ -4834,7 +4834,7 @@ impl ShojiWM {
+             .retain(|window_id| live_window_ids.contains(window_id));
+         self.runtime_poll_dirty = !self.runtime_dirty_window_ids.is_empty();
+         self.async_asset_dirty = false;
+-        self.sync_wlr_foreign_toplevel_states();
++        self.sync_taskbar_window_states();
+         self.sync_popup_dismissals();
+ 
+         Ok(())
+diff --git a/src/shojiwm_lib/src/ssd/window_model.rs b/src/shojiwm_lib/src/ssd/window_model.rs
+index 311e18d..a774900 100644
+--- a/src/shojiwm_lib/src/ssd/window_model.rs
++++ b/src/shojiwm_lib/src/ssd/window_model.rs
+@@ -43,6 +43,10 @@ pub struct WaylandWindowSnapshot {
+     /// `primary_output_name_for_window`); `None` when there is none.
+     #[serde(skip_serializing_if = "Option::is_none")]
+     pub output_name: Option<String>,
++    /// What plasmashell asked for this window through `org_kde_plasma_surface`
++    /// (role, position); `None` for a window without a plasma surface.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub plasma: Option<crate::protocols::plasma_shell::PlasmaSurfaceSnapshot>,
+ }
+ 
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+@@ -914,6 +918,7 @@ impl ShojiWM {
+                 bytes: None,
+             }),
+             interaction: DecorationInteractionSnapshot::default(),
++            plasma: crate::protocols::plasma_shell::plasma_surface_snapshot(toplevel.wl_surface()),
+         }
+     }
+ 
+@@ -938,6 +943,7 @@ impl ShojiWM {
+                 parent_id: None,
+                 icon: None,
+                 interaction: DecorationInteractionSnapshot::default(),
++                plasma: None,
+             };
+         };
+ 
+@@ -1013,6 +1019,7 @@ impl ShojiWM {
+                 bytes: None,
+             }),
+             interaction: DecorationInteractionSnapshot::default(),
++            plasma: None,
+         }
+     }
+ 
+diff --git a/src/shojiwm_lib/src/state.rs b/src/shojiwm_lib/src/state.rs
+index 8ccc608..64cebe8 100644
+--- a/src/shojiwm_lib/src/state.rs
++++ b/src/shojiwm_lib/src/state.rs
+@@ -297,6 +297,10 @@ pub struct ShojiWM {
+         smithay::wayland::foreign_toplevel_list::ForeignToplevelListState,
+     pub wlr_foreign_toplevel_manager_state:
+         crate::wlr_foreign_toplevel::WlrForeignToplevelManagerState,
++    /// KDE's taskbar protocol, for plasmashell.
++    pub plasma_window_management_state:
++        crate::plasma_window_management::PlasmaWindowManagementState,
++    pub plasma_shell_state: crate::protocols::plasma_shell::PlasmaShellState,
+     pub ext_workspace_manager_state: crate::workspace_manager::ExtWorkspaceManagerState,
+     pub image_capture_source_state: smithay::wayland::image_capture_source::ImageCaptureSourceState,
+     pub output_capture_source_state:
+@@ -1568,6 +1572,9 @@ impl ShojiWM {
+             smithay::wayland::foreign_toplevel_list::ForeignToplevelListState::new::<Self>(&dh);
+         let wlr_foreign_toplevel_manager_state =
+             crate::wlr_foreign_toplevel::WlrForeignToplevelManagerState::new::<Self>(&dh);
++        let plasma_window_management_state =
++            crate::plasma_window_management::PlasmaWindowManagementState::new(&dh);
++        let plasma_shell_state = crate::protocols::plasma_shell::PlasmaShellState::new(&dh);
+         let ext_workspace_manager_state =
+             crate::workspace_manager::ExtWorkspaceManagerState::new::<Self>(&dh);
+         let image_capture_source_state =
+@@ -1726,6 +1733,8 @@ impl ShojiWM {
+             color_management_state,
+             foreign_toplevel_list_state,
+             wlr_foreign_toplevel_manager_state,
++            plasma_window_management_state,
++            plasma_shell_state,
+             ext_workspace_manager_state,
+             image_capture_source_state,
+             output_capture_source_state,
+@@ -3072,6 +3081,7 @@ impl ShojiWM {
+     pub fn warmup_decoration_runtime(&mut self) {
+         let snapshot = WaylandWindowSnapshot {
+             output_name: None,
++            plasma: None,
+             id: "__warmup__".into(),
+             title: "warmup".into(),
+             app_id: Some("shoji_wm.warmup".into()),
+diff --git a/src/shojiwm_lib/src/wlr_foreign_toplevel.rs b/src/shojiwm_lib/src/wlr_foreign_toplevel.rs
+index 1fd27a8..5c83ee6 100644
+--- a/src/shojiwm_lib/src/wlr_foreign_toplevel.rs
++++ b/src/shojiwm_lib/src/wlr_foreign_toplevel.rs
+@@ -969,6 +969,55 @@ impl ShojiWM {
+     }
+ }
+ 
++impl ShojiWM {
++    /// A taskbar (wlr or plasma) asked to activate `window`.
++    pub(crate) fn activate_window_from_taskbar(&mut self, window: &Window) {
++        // Picking a window out of a taskbar is the user choosing it, even
++        // though the click itself landed on the panel rather than on the window
++        // — the input layer cannot attribute it. Record it so a later successor
++        // election knows about it, and so the focus-ordering rule cannot refuse
++        // it or anything the handler focuses instead.
++        self.note_window_user_input(window);
++        let previous = std::mem::replace(&mut self.user_input_in_flight, true);
++        self.request_window_activate(
++            window,
++            crate::ssd::WindowActivateRequestSourceSnapshot::Api,
++        );
++        self.user_input_in_flight = previous;
++    }
++
++    /// A taskbar (wlr or plasma) asked to minimize or restore `window`.
++    pub(crate) fn minimize_window_from_taskbar(&mut self, window: &Window, minimized: bool) {
++        // A taskbar minimize is the user's pick just like a taskbar activate.
++        // Minimizing the focused window hands the keyboard to a successor, and
++        // the focus-ordering rule would otherwise refuse that handoff whenever
++        // the minimized window was created later and neither has been used
++        // yet — leaving the keyboard on the window that just disappeared.
++        let previous = std::mem::replace(&mut self.user_input_in_flight, true);
++        self.request_window_minimize(
++            window,
++            minimized,
++            crate::ssd::WindowStateRequestSourceSnapshot::Api,
++        );
++        self.user_input_in_flight = previous;
++    }
++
++    /// A taskbar (wlr or plasma) asked to close `window`.
++    pub(crate) fn close_window_from_taskbar(&mut self, window: &Window) {
++        if let Err(error) = capture_live_snapshot_for_close(self, window) {
++            tracing::warn!(
++                ?error,
++                "failed to capture foreign toplevel before close request"
++            );
++        }
++        if let Some(toplevel) = window.toplevel() {
++            toplevel.send_close();
++        } else if let Some(x11) = window.x11_surface() {
++            let _ = x11.close();
++        }
++    }
++}
++
+ impl WlrForeignToplevelManagerHandler for ShojiWM {
+     fn wlr_foreign_toplevel_manager_state(&mut self) -> &mut WlrForeignToplevelManagerState {
+         &mut self.wlr_foreign_toplevel_manager_state
+@@ -1007,36 +1056,15 @@ impl WlrForeignToplevelManagerHandler for ShojiWM {
+         let Some(window) = self.wlr_foreign_toplevel_window(handle) else {
+             return;
+         };
+-        // Picking a window out of a taskbar is the user choosing it, even
+-        // though the click itself landed on the panel rather than on the window
+-        // — the input layer cannot attribute it. Record it so a later successor
+-        // election knows about it, and so the focus-ordering rule cannot refuse
+-        // it or anything the handler focuses instead.
+-        self.note_window_user_input(&window);
+-        let previous = std::mem::replace(&mut self.user_input_in_flight, true);
+-        self.request_window_activate(
+-            &window,
+-            crate::ssd::WindowActivateRequestSourceSnapshot::Api,
+-        );
+-        self.user_input_in_flight = previous;
+-        self.sync_wlr_foreign_toplevel_states();
++        self.activate_window_from_taskbar(&window);
++        self.sync_taskbar_window_states();
+     }
+ 
+     fn wlr_foreign_toplevel_close(&mut self, handle: &WlrForeignToplevelHandle) {
+         let Some(window) = self.wlr_foreign_toplevel_window(handle) else {
+             return;
+         };
+-        if let Err(error) = capture_live_snapshot_for_close(self, &window) {
+-            tracing::warn!(
+-                ?error,
+-                "failed to capture foreign toplevel before close request"
+-            );
+-        }
+-        if let Some(toplevel) = window.toplevel() {
+-            toplevel.send_close();
+-        } else if let Some(x11) = window.x11_surface() {
+-            let _ = x11.close();
+-        }
++        self.close_window_from_taskbar(&window);
+     }
+ 
+     fn wlr_foreign_toplevel_set_maximized(
+@@ -1052,7 +1080,7 @@ impl WlrForeignToplevelManagerHandler for ShojiWM {
+             maximized,
+             crate::ssd::WindowStateRequestSourceSnapshot::Api,
+         );
+-        self.sync_wlr_foreign_toplevel_states();
++        self.sync_taskbar_window_states();
+     }
+ 
+     fn wlr_foreign_toplevel_set_minimized(
+@@ -1063,19 +1091,8 @@ impl WlrForeignToplevelManagerHandler for ShojiWM {
+         let Some(window) = self.wlr_foreign_toplevel_window(handle) else {
+             return;
+         };
+-        // A taskbar minimize is the user's pick just like a taskbar activate.
+-        // Minimizing the focused window hands the keyboard to a successor, and
+-        // the focus-ordering rule would otherwise refuse that handoff whenever
+-        // the minimized window was created later and neither has been used
+-        // yet — leaving the keyboard on the window that just disappeared.
+-        let previous = std::mem::replace(&mut self.user_input_in_flight, true);
+-        self.request_window_minimize(
+-            &window,
+-            minimized,
+-            crate::ssd::WindowStateRequestSourceSnapshot::Api,
+-        );
+-        self.user_input_in_flight = previous;
+-        self.sync_wlr_foreign_toplevel_states();
++        self.minimize_window_from_taskbar(&window, minimized);
++        self.sync_taskbar_window_states();
+     }
+ 
+     fn wlr_foreign_toplevel_set_fullscreen(
+@@ -1097,7 +1114,7 @@ impl WlrForeignToplevelManagerHandler for ShojiWM {
+             output_name,
+             crate::ssd::WindowStateRequestSourceSnapshot::Api,
+         );
+-        self.sync_wlr_foreign_toplevel_states();
++        self.sync_taskbar_window_states();
+     }
+ }
+ 
+diff --git a/src/shojiwm_rs/examples/default_config/main.rs b/src/shojiwm_rs/examples/default_config/main.rs
+index 1574dd9..1426985 100644
+--- a/src/shojiwm_rs/examples/default_config/main.rs
++++ b/src/shojiwm_rs/examples/default_config/main.rs
+@@ -1114,6 +1114,7 @@ mod tests {
+     fn window(id: &str, focused: bool) -> WaylandWindowSnapshot {
+         WaylandWindowSnapshot {
+             output_name: None,
++            plasma: None,
+             id: id.into(),
+             title: format!("window {id}"),
+             app_id: Some("org.example.App".into()),
+diff --git a/src/shojiwm_rs/src/window.rs b/src/shojiwm_rs/src/window.rs
+index 213e9e0..3a391cd 100644
+--- a/src/shojiwm_rs/src/window.rs
++++ b/src/shojiwm_rs/src/window.rs
+@@ -293,6 +293,7 @@ impl Window {
+ fn empty_snapshot() -> WaylandWindowSnapshot {
+     WaylandWindowSnapshot {
+         output_name: None,
++        plasma: None,
+         id: String::new(),
+         title: String::new(),
+         app_id: None,
+diff --git a/src/shojiwm_rs/tests/reactive_runtime.rs b/src/shojiwm_rs/tests/reactive_runtime.rs
+index e236531..0108bf2 100644
+--- a/src/shojiwm_rs/tests/reactive_runtime.rs
++++ b/src/shojiwm_rs/tests/reactive_runtime.rs
+@@ -16,6 +16,7 @@ static WIDTH: WindowStateKey<f64> = WindowStateKey::new("width", |_| 400.0);
+ fn snapshot(id: &str, title: &str, focused: bool) -> WaylandWindowSnapshot {
+     WaylandWindowSnapshot {
+         output_name: None,
++        plasma: None,
+         id: id.into(),
+         title: title.into(),
+         app_id: Some("test".into()),
+-- 
+2.56.0
+
