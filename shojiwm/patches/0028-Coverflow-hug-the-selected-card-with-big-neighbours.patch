@@ -1,7 +1,7 @@
 From 1f466ff7bc86e13894dd75d2c97de1e1f8ade5de Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 22:13:20 +0200
-Subject: [PATCH 28/32] Coverflow: hug the selected card with big neighbours
+Subject: [PATCH 28/33] Coverflow: hug the selected card with big neighbours
 
 Changed from the extension's defaults, as Abhishek asked:
 - The side stacks follow the selected card: the first neighbour's far end

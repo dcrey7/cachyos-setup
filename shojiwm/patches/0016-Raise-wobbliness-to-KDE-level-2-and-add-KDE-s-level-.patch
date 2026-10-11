@@ -1,7 +1,7 @@
 From ddc2c0f134169a87d0424715992b29d9de5398e2 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 17:52:24 +0200
-Subject: [PATCH 16/32] Raise wobbliness to KDE level 2 and add KDE's level
+Subject: [PATCH 16/33] Raise wobbliness to KDE level 2 and add KDE's level
  table
 
 ---

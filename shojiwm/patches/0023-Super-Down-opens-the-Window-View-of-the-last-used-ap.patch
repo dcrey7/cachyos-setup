@@ -1,7 +1,7 @@
 From 2a12c04417a1164795c6d45a695809c8b03d6d1e Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 21:32:28 +0200
-Subject: [PATCH 23/32] Super+Down opens the Window View of the last used app
+Subject: [PATCH 23/33] Super+Down opens the Window View of the last used app
 
 ---
  packages/config/src/index.tsx | 19 +++++++++++++++++--

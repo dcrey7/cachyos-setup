@@ -1,7 +1,7 @@
 From b3d98cb5ddb1884713a9bc0d17dc1a73dde79f4b Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 15:39:02 +0200
-Subject: [PATCH 01/32] Use macOS traffic-light buttons in the title bar
+Subject: [PATCH 01/33] Use macOS traffic-light buttons in the title bar
 
 Move close, minimize, and maximize to the left in macOS order.
 Color them red, yellow, and green, with grey when the window is

@@ -1,7 +1,7 @@
 From 3f7cd5dc2ba3c24cd9f5a36ba96f8843f9d799f6 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 21:39:09 +0200
-Subject: [PATCH 24/32] Alt+Tab: port GNOME's Coverflow Alt-Tab switcher
+Subject: [PATCH 24/33] Alt+Tab: port GNOME's Coverflow Alt-Tab switcher
 
 The selected window faces you in the centre. The others turn 90 degrees
 and stack to the left and right, as in dsheeler/CoverflowAltTab with its

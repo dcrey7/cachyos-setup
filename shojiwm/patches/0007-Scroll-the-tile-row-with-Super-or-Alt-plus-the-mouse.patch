@@ -1,7 +1,7 @@
 From 50182c16b0a4508006a33a254291a6e77a7fe7e9 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 15:57:12 +0200
-Subject: [PATCH 07/32] Scroll the tile row with Super or Alt plus the mouse
+Subject: [PATCH 07/33] Scroll the tile row with Super or Alt plus the mouse
  wheel
 
 ---

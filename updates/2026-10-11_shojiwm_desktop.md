@@ -6,7 +6,7 @@
 ## Files changed
 
 - `shojiwm/` (new):
-  - `patches/`: 32 ShojiWM commits on top of upstream `13c8eca`.
+  - `patches/`: 33 ShojiWM commits on top of upstream `13c8eca`.
   - `config/`: a snapshot of the ShojiWM config.
   - `lockscreen/hyprlock.conf`
   - `install.sh`
@@ -48,8 +48,8 @@ Checked with commands:
 - `cargo test -p shojiwm_lib`: 279 passed.
 
 Patches:
-- The 32 patches were applied with `git am` to a clean clone at upstream `13c8eca`.
-- The resulting tree is identical to the working branch (tree `fb05858`).
+- The 33 patches were applied with `git am` to a clean clone at upstream `13c8eca`.
+- The resulting tree is identical to the working branch (tree `527c118`).
 
 ## Not tested
 

@@ -1,7 +1,7 @@
 From a49bd7dffe2d3ed1016569e497c5254d93734341 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 17:58:59 +0200
-Subject: [PATCH 17/32] Speak KDE's taskbar and plasma-shell protocols, start
+Subject: [PATCH 17/33] Speak KDE's taskbar and plasma-shell protocols, start
  kglobalaccel
 
 Add org_kde_plasma_window_management (v18) so the KDE taskbar lists,

@@ -1,7 +1,7 @@
 From 8d63c692da4dd84c0aa8bfe53e8a7f5d21365954 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 16:46:19 +0200
-Subject: [PATCH 11/32] Add jelly drag, a light copy of KDE's Wobbly Windows
+Subject: [PATCH 11/33] Add jelly drag, a light copy of KDE's Wobbly Windows
 
 While a window is dragged, a spring makes its far side trail the pointer
 and wobble back on release; a shader shifts the pixels. The effect

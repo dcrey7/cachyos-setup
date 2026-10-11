@@ -1,7 +1,7 @@
 From bcbfbd404ca2bed37c6b732bed255cb0909df90d Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 22:33:07 +0200
-Subject: [PATCH 31/32] Find X11 app icons by lower-case name and
+Subject: [PATCH 31/33] Find X11 app icons by lower-case name and
  StartupWMClass
 
 ---

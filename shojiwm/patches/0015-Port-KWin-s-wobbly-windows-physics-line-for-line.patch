@@ -1,7 +1,7 @@
 From d0e1763f9f558ab3a8b8cb21442c162151af49b9 Mon Sep 17 00:00:00 2001
 From: Abhishek <abhishek01789@gmail.com>
 Date: Sun, 11 Oct 2026 17:49:52 +0200
-Subject: [PATCH 15/32] Port KWin's wobbly windows physics line for line
+Subject: [PATCH 15/33] Port KWin's wobbly windows physics line for line
 
 Use KWin's 4x4 spring grid with its default parameter set: stiffness
 0.15, drag 0.8, move factor 0.1, 10 ms steps. The grab point is pulled
