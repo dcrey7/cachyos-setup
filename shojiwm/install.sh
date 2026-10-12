@@ -21,7 +21,7 @@ SRC_DIR="${SHOJIWM_SRC_DIR:-$HOME/Downloads/work/ShojiWM}"
 # Our ShojiWM: upstream bea4dev/ShojiWM plus the KDE Plasma work, on our fork.
 FORK_URL="https://github.com/dcrey7/ShojiWM.git"
 # The fork commit this setup is tested with (branch kde-plasma-session).
-FORK_COMMIT="f6c70e2b99a99d9ec7a3224ecdd1b6c09ce7953a"
+FORK_COMMIT="2455130643af3cc9c1aa76d311f8951f608af7ee"
 BRANCH="cachyos-shojiwm"
 CONFIG_DIR="$HOME/.config/shojiwm"
 PORTALS_CONF="$HOME/.config/xdg-desktop-portal/shojiwm-portals.conf"
