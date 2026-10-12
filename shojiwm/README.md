@@ -27,10 +27,15 @@ It asks for your password once. Then log out and pick "ShojiWM" at login.
 
 What it does:
 
-1. Installs `seatd`, `hyprlock`, `swayidle`, `python-gobject`, `python-pyqt6` and `grim`.
-2. Clones upstream ShojiWM to `~/Downloads/work/ShojiWM` (or `$SHOJIWM_SRC_DIR`),
-   checks out commit `13c8eca` and applies `patches/` on branch `cachyos-shojiwm`.
-3. Builds and installs it with ShojiWM's own `dist/install.sh`.
+1. Installs `seatd`, `hyprlock`, `swayidle`, `python-gobject`, `python-pyqt6`, `grim`
+   and `xdg-desktop-portal-kde`.
+2. Clones our fork [dcrey7/ShojiWM](https://github.com/dcrey7/ShojiWM) to
+   `~/Downloads/work/ShojiWM` (or `$SHOJIWM_SRC_DIR`) and checks out the tested
+   commit (`FORK_COMMIT` in `install.sh`, branch `kde-plasma-session`) on branch
+   `cachyos-shojiwm`.
+3. Builds and installs it with ShojiWM's own `dist/install.sh`, then sets the
+   KDE file and app chooser dialogs (`~/.config/xdg-desktop-portal/shojiwm-portals.conf`).
+   ShojiWM's installer sets GTK ones, and GTK's file chooser draws an empty frame here.
 4. Copies the config to `~/.config/shojiwm/src` and backs up the old one.
 5. Copies the hyprlock lock screen, if you have none.
 6. Installs the workspace circles widget.
@@ -39,15 +44,14 @@ What it does:
 
 | Path | What it is |
 |---|---|
-| `patches/` | Our ShojiWM commits on top of upstream (`git format-patch`). |
-| `config/` | A readable copy of the ShojiWM config the patches install. |
+| `config/` | A readable copy of the ShojiWM config at the pinned fork commit. |
 | `lockscreen/hyprlock.conf` | The lock screen: blurred wallpaper, clock, password field. |
 | `install.sh` | The installer above. |
 
 The workspace circles widget lives with the other plasmoids in
 `assets/plasmoids/cachyos-workspace-indicator`.
 
-## What the patches add to ShojiWM
+## What our fork adds to ShojiWM
 
 KDE protocols, so plasmashell works without KWin:
 
@@ -82,11 +86,14 @@ Session pieces:
 | Super tap | Kickoff |
 | Alt+Tab | Coverflow switcher |
 | Super+Tab | Window grid: every window, in rows and columns |
-| Super+Down | Window View of the app you used last |
+| Super+W | Window View of the app you used last |
+| Super+/ | Cheat sheet with every key (or run `shoji-keys` in a terminal) |
+| Super+Left/Right | Tiling: focus the tile left / right. Floating: left / right half |
+| Super+Up/Down | Tiling: focus up / down in a stack. Floating: maximize / bottom half, again for the top half |
+| Super+H, Super+M, Super+F, Super+Q | Minimize, maximize, full screen, close |
 | Super+N, Super+FN, Ctrl+FN | Go to workspace N |
 | Super+Shift+N | Send the focused window to workspace N |
-| Super+Ctrl+Up/Down | Previous / next workspace |
-| Super+Alt+Up/Down | Focus up / down inside a stacked column |
+| Super+Ctrl+arrows | Previous / next workspace |
 | Super+L | Lock |
 | Ctrl+Alt+Delete | Log out |
 | Print, Super+Print, Shift+Print, Super+Shift+S | Spectacle |

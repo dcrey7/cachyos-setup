@@ -37,6 +37,9 @@ export type SnapZone =
   | "bottom-left"
   | "bottom-right";
 
+/** A half of the screen a key puts a floating window in (KDE's quick tile). */
+export type WindowHalf = "left" | "right" | "top" | "bottom";
+
 export const WINDOW_STATE_RECT = createWindowState<ManagedWindowRect>("rect", {
   default: (window) => window.rect,
 });
@@ -132,6 +135,26 @@ export const WINDOW_STATE_SNAP_MONITOR = createWindowState<string | null>(
 );
 
 const OPEN_CLOSE_ANIMATION_DURATION = seconds(0.5);
+
+/**
+ * Dialogs that another program shows for an app: they always float, also on
+ * a tiled workspace. The app is not their parent, so `isTransient` is false.
+ * Example: Chrome's upload dialog comes from the file chooser portal.
+ */
+const ALWAYS_FLOAT_APP_IDS = new Set([
+  "org.freedesktop.impl.portal.desktop.kde",
+  "xdg-desktop-portal-gtk",
+  "org.kde.kdialog",
+]);
+
+/** The window can be a tile: resizable, not a child window, not a dialog. */
+export function isTileable(window: WaylandWindow): boolean {
+  return (
+    window.isResizable.peek() &&
+    !window.isTransient.peek() &&
+    !ALWAYS_FLOAT_APP_IDS.has(window.appId.peek() ?? "")
+  );
+}
 const INITIAL_TILEABILITY_SETTLE_DURATION = seconds(1);
 const WINDOW_MANAGEMENT_ANIMATION_DURATION = seconds(0.3);
 const UNMAXIMIZE_GRAB_ANIMATION_DURATION = 90;
@@ -158,8 +181,24 @@ const TILE_DRAG_WORKSPACE_EDGE_PX = 80;
 const TILE_DRAG_WORKSPACE_SWITCH_INTERVAL_MS = 420;
 const TILE_GAP = 12;
 const TILE_MARGIN = 12;
+/** ShojiWM's default: a new tile takes this share of the viewport width. */
+const TILE_WIDTH_RATIO = 0.5;
+/** With the even split: up to this many columns share the screen. */
 const TILE_FIT_MAX_COLUMNS = 3;
 const TILE_MIN_WIDTH = 240;
+
+/** True when tiles split the screen evenly (see `configureEvenTileSplit`). */
+let evenTileSplit: () => boolean = () => false;
+
+/**
+ * Split tiles evenly, like KDE: up to TILE_FIT_MAX_COLUMNS columns share the
+ * screen, and only a tile the user resized by hand keeps its own width.
+ * Off by default: each new tile takes TILE_WIDTH_RATIO of the viewport.
+ * Example: `configureEvenTileSplit(() => kdePanelIsPresent())`.
+ */
+export function configureEvenTileSplit(enabled: () => boolean) {
+  evenTileSplit = enabled;
+}
 // Fractional-scale rounding can leave a tile a hair past the screen edge;
 // overflow at or below this is "fully visible" for the focus-key pan step.
 const TILE_FOCUS_OVERFLOW_EPSILON = 1;
@@ -473,6 +512,8 @@ export class HybridWindowManager {
     zone: SnapZone;
     rect: ManagedWindowRect;
   } | null = null;
+  // The half a key last put each floating window in. A drag clears it.
+  private readonly keyHalfByWindowId = new Map<string, WindowHalf>();
 
   public constructor(
     naturalRootRect: (rect: WaylandWindow) => ManagedWindowRect,
@@ -662,21 +703,17 @@ export class HybridWindowManager {
 
   private trackWindowTileability(window: WaylandWindow) {
     this.untrackWindowTileability(window.id);
-    this.tileabilityByWindowId.set(
-      window.id,
-      window.isResizable.peek() && !window.isTransient.peek(),
-    );
+    this.tileabilityByWindowId.set(window.id, isTileable(window));
 
     const onChange = () => {
       const wasTileable = this.tileabilityByWindowId.get(window.id);
-      const isTileable =
-        window.isResizable.peek() && !window.isTransient.peek();
-      if (wasTileable === undefined || wasTileable === isTileable) {
+      const tileable = isTileable(window);
+      if (wasTileable === undefined || wasTileable === tileable) {
         return;
       }
 
-      this.tileabilityByWindowId.set(window.id, isTileable);
-      if (!isTileable) {
+      this.tileabilityByWindowId.set(window.id, tileable);
+      if (!tileable) {
         this.pendingInitialFocusByWindowId.delete(window.id);
       }
       const workspace = this.findWorkspaceForWindow(window);
@@ -690,9 +727,11 @@ export class HybridWindowManager {
 
     const unsubscribeResizable = window.isResizable.subscribe(onChange);
     const unsubscribeTransient = window.isTransient.subscribe(onChange);
+    const unsubscribeAppId = window.appId.subscribe(onChange);
     this.tileabilitySubscriptionsByWindowId.set(window.id, () => {
       unsubscribeResizable();
       unsubscribeTransient();
+      unsubscribeAppId();
     });
   }
 
@@ -858,7 +897,7 @@ export class HybridWindowManager {
     // A floating window must commit its natural client size before it can be
     // centered. Using the pre-commit geometry here feeds the degenerate-size
     // fallback into the initial configure and makes fixed-size dialogs huge.
-    if (!window.isResizable.peek() || window.isTransient.peek()) {
+    if (!isTileable(window)) {
       return true;
     }
 
@@ -975,6 +1014,7 @@ export class HybridWindowManager {
 
   public onClose(window: WaylandWindow) {
     this.presentedWindowIds.delete(window.id);
+    this.keyHalfByWindowId.delete(window.id);
     this.lastRestoreAtMs.delete(window.id);
     this.restoredDuringInitialConfigure.delete(window.id);
     this.deferredInitialLayoutWindowIds.delete(window.id);
@@ -1647,6 +1687,85 @@ export class HybridWindowManager {
     this.runOnTiledWorkspace((workspace) =>
       workspace.focusInColumn(direction),
     );
+  }
+
+  /** Move the focused tile up (-1) or down (1) inside its column. */
+  public moveFocusedInColumn(direction: -1 | 1) {
+    this.runOnTiledWorkspace((workspace) =>
+      workspace.moveFocusedInColumn(direction),
+    );
+  }
+
+  /** The current workspace tiles its windows (else they float). */
+  public isCurrentWorkspaceTiled(): boolean {
+    return this.getCurrentWorkspace()?.isTiled ?? false;
+  }
+
+  /**
+   * Put the focused floating window in a half of the screen, like KDE's
+   * Meta+arrow quick tile. "bottom-then-top" puts it in the bottom half, or
+   * in the top half when a key already put it in the bottom half.
+   */
+  public placeFocusedWindowInHalf(half: WindowHalf | "bottom-then-top") {
+    withManagedWindowOnlySSDRebuildSuppressed(() => {
+      const workspace = this.getCurrentWorkspace();
+      const window = workspace?.focusedWindow();
+      if (!workspace || workspace.isTiled || !window || !read(window.isResizable)) {
+        return;
+      }
+      const target: WindowHalf =
+        half === "bottom-then-top"
+          ? this.keyHalfByWindowId.get(window.id) === "bottom" &&
+            !window.state[WINDOW_STATE_MAXIMIZED]()
+            ? "top"
+            : "bottom"
+          : half;
+      const rect = this.halfRect(workspace.monitor, target);
+      if (!rect) {
+        return;
+      }
+      // Unmaximize first (this syncs the title bar icon). Clear the restore
+      // rect, so unmaximize() does not animate back to it over the half.
+      if (window.state[WINDOW_STATE_MAXIMIZED]()) {
+        window.state[WINDOW_STATE_RESTORE_RECT].set(null);
+        window.state[WINDOW_STATE_MAXIMIZED].set(false);
+        window.unmaximize();
+      }
+      playRectAnimation(
+        window,
+        WINDOW_STATE_RECT,
+        rect,
+        WINDOW_MANAGEMENT_EASING,
+        WINDOW_MANAGEMENT_ANIMATION_DURATION,
+      );
+      // Left and right join the drag snap layout (a shared, resizable split).
+      if (target === "left" || target === "right") {
+        this.setWindowSnapState(workspace, window, workspace.monitor, target);
+      } else {
+        this.clearWindowSnapState(window);
+      }
+      this.keyHalfByWindowId.set(window.id, target);
+      workspace.syncFloatingWindowRect(window, rect);
+      this.applyWorkspaceStackPolicy(workspace);
+    });
+  }
+
+  /** The rect of a half of the monitor, with the same gaps as a drag snap. */
+  private halfRect(monitor: string, half: WindowHalf): ManagedWindowRect | null {
+    if (half === "left" || half === "right") {
+      return this.snapZoneRect(monitor, half);
+    }
+    const base = this.monitorSnapBaseRect(monitor);
+    if (!base) {
+      return null;
+    }
+    const halfHeight = (read(base.height) - SNAP_GAP_PX) / 2;
+    return {
+      x: read(base.x),
+      y: half === "top" ? read(base.y) : read(base.y) + halfHeight + SNAP_GAP_PX,
+      width: read(base.width),
+      height: halfHeight,
+    };
   }
 
   private runOnTiledWorkspace(action: (workspace: Workspace) => boolean) {
@@ -3392,6 +3511,7 @@ export class HybridWindowManager {
   }
 
   private clearWindowSnapState(window: WaylandWindow): void {
+    this.keyHalfByWindowId.delete(window.id);
     window.state[WINDOW_STATE_SNAP_ZONE].set(null);
     window.state[WINDOW_STATE_SNAP_MONITOR].set(null);
   }
@@ -3999,6 +4119,23 @@ export class Workspace {
     return this.commitColumnChange(focused, null);
   }
 
+  /** Move the focused tile up (-1) or down (1) inside its column. */
+  public moveFocusedInColumn(direction: -1 | 1): boolean {
+    const focused = this.focusedTile();
+    if (!focused) {
+      return false;
+    }
+    const allColumns = this.allTileColumns();
+    const column = allColumns[this.columnIndexOf(allColumns, focused.id)];
+    const row = column?.findIndex((window) => window.id === focused.id) ?? -1;
+    const other = row + direction;
+    if (row < 0 || other < 0 || other >= column.length) {
+      return false;
+    }
+    [column[row], column[other]] = [column[other], column[row]];
+    return this.commitColumnChange(focused, allColumns);
+  }
+
   /** Move focus up (-1) or down (1) inside the focused column. */
   public focusInColumn(direction: -1 | 1): boolean {
     if (!this.isTiled) {
@@ -4417,6 +4554,7 @@ export class Workspace {
     this.lastDraggingSlotRect = null;
 
     // One x and width per column. The windows of a column split its height.
+    // A window alone in its column keeps the client's height cap (centered).
     const placements: { window: WaylandWindow; rect: ManagedWindowRect }[] =
       [];
     for (const column of this.tileColumns(tileable)) {
@@ -4428,12 +4566,14 @@ export class Workspace {
           ? this.fullscreenRootRect(window)
           : window.state[WINDOW_STATE_MAXIMIZED]()
             ? this.maximizedTileRect(window, nextX)
-            : {
-                x: nextX,
-                y: read(viewportRect.y) + row * (tileHeight + TILE_GAP),
-                width: columnWidth,
-                height: tileHeight,
-              };
+            : column.length === 1
+              ? this.tileRect(window, nextX, columnWidth, viewportRect)
+              : {
+                  x: nextX,
+                  y: read(viewportRect.y) + row * (tileHeight + TILE_GAP),
+                  width: columnWidth,
+                  height: tileHeight,
+                };
         placements.push({ window, rect });
       });
       nextX += columnWidth + TILE_GAP;
@@ -5103,7 +5243,11 @@ export class Workspace {
   }
 
   public shouldTile(window: WaylandWindow): boolean {
-    return window.isResizable() && !window.isTransient();
+    // Read the signals so a computed caller still tracks them.
+    window.isResizable();
+    window.isTransient();
+    window.appId();
+    return isTileable(window);
   }
 
   public reclassifyWindow(window: WaylandWindow, wasTileable: boolean) {
@@ -5674,10 +5818,13 @@ export class Workspace {
       return read(this.maximizedRootRect(window).width);
     }
 
-    const userWidth = this.userSizedTileIds.has(window.id)
-      ? this.tileWidthByWindowId.get(window.id)
-      : undefined;
-    const width = userWidth ?? this.defaultTileWidth(viewportRect);
+    const even = evenTileSplit();
+    // With the even split, only a tile the user resized keeps its width.
+    const storedWidth =
+      even && !this.userSizedTileIds.has(window.id)
+        ? undefined
+        : this.tileWidthByWindowId.get(window.id);
+    const width = storedWidth ?? this.defaultTileWidth(viewportRect, even);
     return clamp(
       width,
       this.minTileWidth(window, viewportRect),
@@ -5723,7 +5870,10 @@ export class Workspace {
     );
   }
 
-  private defaultTileWidth(viewportRect: ManagedWindowRect): number {
+  private defaultTileWidth(viewportRect: ManagedWindowRect, even: boolean): number {
+    if (!even) {
+      return Math.max(TILE_MIN_WIDTH, read(viewportRect.width) * TILE_WIDTH_RATIO);
+    }
     // Up to TILE_FIT_MAX_COLUMNS columns share the screen evenly, so no
     // column is cut at the edge. More columns scroll at that width.
     const columns = clamp(this.tileColumns().length, 1, TILE_FIT_MAX_COLUMNS);
@@ -5740,11 +5890,42 @@ export class Workspace {
   ): number {
     const constraints = window.sizeConstraints();
     const extra = this.rootClientWidthExtra(window);
+    const clientMin = (constraints.min?.width ?? 1) + extra;
+    // The layout floor must not widen a window past the client's own maximum.
     return Math.max(
-      TILE_MIN_WIDTH,
-      (constraints.min?.width ?? 1) + extra,
-      read(viewportRect.width) * 0.2,
+      clientMin,
+      Math.min(
+        Math.max(TILE_MIN_WIDTH, read(viewportRect.width) * 0.2),
+        this.maxTileWidth(window),
+      ),
     );
+  }
+
+  // A tile spans the viewport height unless the client caps its height; such a
+  // window keeps its maximum and is centered vertically instead of stretched.
+  private tileRect(
+    window: WaylandWindow,
+    x: number,
+    width: number,
+    viewportRect: ManagedWindowRect,
+  ): ManagedWindowRect {
+    const viewportHeight = read(viewportRect.height);
+    const constraints = window.sizeConstraints();
+    const height = Math.min(
+      viewportHeight,
+      constrainedMax(constraints, "height", this.rootClientHeightExtra(window)),
+    );
+    return {
+      x,
+      y: read(viewportRect.y) + Math.round((viewportHeight - height) / 2),
+      width,
+      height,
+    };
+  }
+
+  private rootClientHeightExtra(window: WaylandWindow): number {
+    const natural = this.naturalRootRect(window);
+    return Math.max(0, read(natural.height) - window.position.height);
   }
 
   private maxTileWidth(window: WaylandWindow): number {
