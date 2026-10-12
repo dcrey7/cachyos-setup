@@ -18,14 +18,16 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
 SRC_DIR="${SHOJIWM_SRC_DIR:-$HOME/Downloads/work/ShojiWM}"
-UPSTREAM_URL="https://github.com/bea4dev/ShojiWM.git"
-# The upstream commit our patches apply on top of.
-UPSTREAM_BASE="13c8eca5753b027e118ab051d941ff4208e65507"
+# Our ShojiWM: upstream bea4dev/ShojiWM plus the KDE Plasma work, on our fork.
+FORK_URL="https://github.com/dcrey7/ShojiWM.git"
+# The fork commit this setup is tested with (branch kde-plasma-session).
+FORK_COMMIT="2455130643af3cc9c1aa76d311f8951f608af7ee"
 BRANCH="cachyos-shojiwm"
 CONFIG_DIR="$HOME/.config/shojiwm"
+PORTALS_CONF="$HOME/.config/xdg-desktop-portal/shojiwm-portals.conf"
 
 echo "==> 1/6  Packages ShojiWM needs (seat access, lock screen, idle lock)"
-sudo pacman -S --needed seatd hyprlock swayidle python-gobject python-pyqt6 grim
+sudo pacman -S --needed seatd hyprlock swayidle python-gobject python-pyqt6 grim xdg-desktop-portal-kde
 
 if ! command -v cargo >/dev/null 2>&1; then
     echo "cargo (Rust) is missing. Install rustup, then run this again:" >&2
@@ -33,23 +35,38 @@ if ! command -v cargo >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "==> 2/6  ShojiWM source at $SRC_DIR (upstream $UPSTREAM_BASE + our patches)"
+echo "==> 2/6  ShojiWM source at $SRC_DIR (fork commit ${FORK_COMMIT:0:7})"
 if [[ ! -d "$SRC_DIR/.git" ]]; then
-    git clone "$UPSTREAM_URL" "$SRC_DIR"
+    git clone "$FORK_URL" "$SRC_DIR"
 fi
-git -C "$SRC_DIR" fetch origin
+if ! git -C "$SRC_DIR" remote get-url cachyos-fork >/dev/null 2>&1; then
+    git -C "$SRC_DIR" remote add cachyos-fork "$FORK_URL"
+fi
+git -C "$SRC_DIR" fetch cachyos-fork kde-plasma-session
 if git -C "$SRC_DIR" rev-parse --verify --quiet "$BRANCH" >/dev/null; then
     echo "    branch $BRANCH already exists; leaving it as it is"
     git -C "$SRC_DIR" switch "$BRANCH"
 else
-    git -C "$SRC_DIR" switch -c "$BRANCH" "$UPSTREAM_BASE"
-    git -C "$SRC_DIR" -c user.name="cachyos-setup" -c user.email="cachyos-setup@localhost" \
-        am --committer-date-is-author-date "$HERE"/patches/*.patch
+    git -C "$SRC_DIR" switch -c "$BRANCH" "$FORK_COMMIT"
 fi
 
 echo "==> 3/6  Build and install ShojiWM (cargo build, then sudo install)"
 # dist/install.sh keeps an existing ~/.config/shojiwm; step 4 updates it.
 (cd "$SRC_DIR" && ./dist/install.sh)
+
+# dist/install.sh writes the portal settings with GTK dialogs only. GTK's file
+# chooser draws an empty frame on ShojiWM, so use KDE's (the Dolphin-style
+# "Open" dialog) for files and for picking apps.
+echo "    using KDE file dialogs ($PORTALS_CONF)"
+mkdir -p "$(dirname "$PORTALS_CONF")"
+cat > "$PORTALS_CONF" <<'EOF'
+[preferred]
+default=gtk
+org.freedesktop.impl.portal.ScreenCast=shojiwm
+org.freedesktop.impl.portal.FileChooser=kde
+org.freedesktop.impl.portal.AppChooser=kde
+EOF
+systemctl --user restart xdg-desktop-portal || true
 
 echo "==> 4/6  ShojiWM config -> $CONFIG_DIR/src (old one backed up)"
 if [[ -d "$CONFIG_DIR/src" ]]; then
