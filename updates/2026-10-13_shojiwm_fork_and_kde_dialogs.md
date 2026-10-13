@@ -40,3 +40,13 @@
 ## Not tested
 
 - `shojiwm/install.sh` end to end on a fresh machine.
+
+## Later: upstream merged the KDE protocols
+
+- Upstream ShojiWM merged our pull request #130 and changed one event: moving
+  a window to a desktop is now `onMoveWindow`, not part of `onActivate`.
+- `FORK_COMMIT` is now `2ccc3b9`: upstream `main` merged into the fork, plus
+  the config change for the new event.
+- `shojiwm/config/` is refreshed from that commit.
+- Tested on `2ccc3b9`: `cargo test --workspace` 387 passed, 0 failed; the
+  TypeScript suites pass; the bridge tests 136 passed; the release build works.
