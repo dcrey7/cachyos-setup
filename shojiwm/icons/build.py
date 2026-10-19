@@ -109,8 +109,8 @@ FOLDER_ALIASES = {"folder-downloads": "folder-download"}
 CALCULATOR_NAMES = ["accessories-calculator", "org.kde.kcalc"]
 SIZES = ["16x16", "24x24", "32x32", "48x48", "256x256"]
 MAC_ORANGE = (36 / 360, 0.96, 1.15)  # hue, max saturation, brightness gain
-WINDOWS_YELLOW = (44 / 360, 0.78, 1.12)
-FOLDER_DARK_PART = (32 / 360, 0.82)  # symbol and back flap: amber-orange
+WINDOWS_YELLOW = (45 / 360, 0.58, 1.12)  # light, like the Windows 11 folder
+FOLDER_DARK_PART = (38 / 360, 0.86)  # symbol and back flap: soft amber
 
 
 def find_icon(theme: Path, name: str) -> Path | None:
@@ -179,7 +179,7 @@ def recolor_blue(src: Path, dest: Path, colour: tuple[float, float, float], dark
     if dark_part:
         dark = v < 0.78
         new_h = np.where(dark, dark_part[0], new_h)
-        new_s = np.where(dark, 1.0, new_s)
+        new_s = np.where(dark, 0.8, new_s)
         new_v = np.where(dark, np.minimum(v / 0.68 * dark_part[1], 1), new_v)
     new_rgb = hsv_to_rgb(new_h, new_s, new_v)
     img[..., :3] = np.where(blue[..., None], new_rgb, img[..., :3])
