@@ -12,7 +12,7 @@ Every icon keeps its own shape; nothing is put in a circle or a square.
     Kate            Win11 Notepad
     KWrite          Win11 yellow notes pad (like Apple Notes)
     Settings app    Ubuntu (Yaru) gear
-    Trash           Fluent round bin (like the Mac one)
+    Trash           Windows Recycle Bin
     Settings pages  Win11, one different icon per page; Breeze where Win11
                     repeats one
 
@@ -32,7 +32,6 @@ from PIL import Image
 ICONS = Path.home() / ".local/share/icons"
 WIN11 = ICONS / "Win11-dark"
 YARU_BASE = ICONS / "Yaru-kde-base"
-FLUENT = ICONS / "Fluent-dark"
 BREEZE = Path("/usr/share/icons/breeze-dark")
 YARU = ICONS / "Yaru-blue-kde"
 OUT = Path(__file__).parent / "shoji-picks"
@@ -51,8 +50,8 @@ WIN11_APPS = {
     "org.kde.kwrite": "org.kde.kwrite",
 }
 
-# Icon name -> the Fluent icon to use for it: the Mac-like round bin.
-FLUENT_PICKS = {
+# The trash: the Windows Recycle Bin (glass bin, blue recycle symbol).
+TRASH_PICKS = {
     "user-trash": "user-trash",
     "user-trash-full": "user-trash-full",
     "trash-empty": "user-trash",
@@ -239,9 +238,9 @@ def main() -> None:
     # system-file-manager and preferences-system): drop the Settings copy.
     for name, source in WIN11_APPS.items():
         put_svg(find_icon(WIN11, source), "apps", name)
-    for name, source in FLUENT_PICKS.items():
-        put_svg(find_icon(FLUENT, source), "apps", name)
-    for name in [*WIN11_APPS, *FLUENT_PICKS, *GEAR_NAMES]:
+    for name, source in TRASH_PICKS.items():
+        put_svg(find_icon(WIN11, source), "apps", name)
+    for name in [*WIN11_APPS, *TRASH_PICKS, *GEAR_NAMES]:
         (OUT / "scalable" / "settings" / f"{name}.svg").unlink(missing_ok=True)
 
     fixed_dirs = []

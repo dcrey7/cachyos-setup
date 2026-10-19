@@ -18,7 +18,7 @@ to Yaru-blue-kde, then Breeze dark, then the app's own icon.
 | Screenshot (Spectacle) | Scissors, like the Windows Snipping Tool | Win11-dark |
 | File manager (Dolphin) | Open Microsoft yellow folder, no blue bar | Win11-dark |
 | Settings app | Ubuntu gear | Yaru |
-| Trash | Round light-gray bin, like the Mac one | Fluent-dark |
+| Trash | Windows Recycle Bin (glass bin, blue recycle symbol) | Win11-dark |
 | Folders (Home, Documents, Pictures, ...) | Yaru folders in Windows yellow, symbols in amber | Yaru-blue, recoloured |
 | Kate | Windows Notepad | Win11-dark |
 | KWrite | Yellow notes pad, like Apple Notes | Win11-dark |
