@@ -65,9 +65,9 @@ GridLayout {
     // dock-zoom: a Mac-style zoom on the icons near the mouse.
     // Only scale transforms change while the mouse moves (no new layout),
     // so the GPU does the work. Task.qml reads these values.
-    readonly property real zoomRest: 0.8   // icon size at rest, of its slot
-    readonly property real zoomMax: 1.12   // icon size right under the mouse
-    readonly property real zoomReach: 2.5  // how many icons around it grow
+    readonly property real zoomRest: 0.7   // icon size at rest, of its slot
+    readonly property real zoomMax: 1.18   // icon size right under the mouse
+    readonly property real zoomReach: 1.5  // how many icons around it grow
     // Where the mouse is (kept when it leaves, so the zoom fades in place).
     property real zoomX: 0
     // How much zoom is on: eases 0 -> 1 when the mouse comes, back when it goes.
