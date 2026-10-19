@@ -20,7 +20,7 @@
 
 - Every icon keeps its own shape, and the dark-theme variants are used.
 - Calculator: orange "=" (Mac). Spectacle: scissors (Windows Snipping Tool).
-- Dolphin: Windows File Explorer folder. Kate: Windows Notepad. KWrite: yellow notes pad.
+- Dolphin: open Microsoft yellow folder, no blue bar. Settings app: Ubuntu (Yaru) gear. Kate: Windows Notepad. KWrite: yellow notes pad.
 - Folders: yellow, with amber symbols (house, page, arrow, note, picture, film).
 - Settings: Win11 icons, one per page; Breeze where Win11 repeats one.
 

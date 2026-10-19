@@ -7,10 +7,11 @@ Every icon keeps its own shape; nothing is put in a circle or a square.
 
     calculator      Yaru, with the blue "=" made orange (like the Mac one)
     Spectacle       Win11 scissors (like the Windows Snipping Tool)
-    Dolphin         Win11 yellow folder (like the Windows File Explorer)
+    Dolphin         Win11 open yellow folder (Microsoft yellow, no blue bar)
     folders         Yaru folders, blue made Windows yellow (symbols kept)
     Kate            Win11 Notepad
     KWrite          Win11 yellow notes pad (like Apple Notes)
+    Settings app    Ubuntu (Yaru) gear
     Settings pages  Win11, one different icon per page; Breeze where Win11
                     repeats one
 
@@ -29,6 +30,7 @@ from PIL import Image
 
 ICONS = Path.home() / ".local/share/icons"
 WIN11 = ICONS / "Win11-dark"
+YARU_BASE = ICONS / "Yaru-kde-base"
 BREEZE = Path("/usr/share/icons/breeze-dark")
 YARU = ICONS / "Yaru-blue-kde"
 OUT = Path(__file__).parent / "shoji-picks"
@@ -38,14 +40,17 @@ WIN11_APPS = {
     "spectacle": "spectacle",
     "org.kde.spectacle": "spectacle",
     "applets-screenshooter": "spectacle",
-    "org.kde.dolphin": "org.kde.dolphin",
-    "system-file-manager": "org.kde.dolphin",
+    "org.kde.dolphin": "folder-open",
+    "system-file-manager": "folder-open",
     "kate": "kate",
     "org.kde.kate": "kate",
     "accessories-text-editor": "kate",
     "kwrite": "org.kde.kwrite",
     "org.kde.kwrite": "org.kde.kwrite",
 }
+
+# The Settings app keeps the Ubuntu (Yaru) gear.
+GEAR_NAMES = ["preferences-system", "systemsettings", "org.kde.systemsettings"]
 
 # The icons of the System Settings pages and groups (from the KCM plugins).
 # The "-symbolic" ones stay Breeze: they are one-colour line icons that the
@@ -221,9 +226,12 @@ def write_index(dirs: list[str]) -> None:
 def main() -> None:
     shutil.rmtree(OUT, ignore_errors=True)
     notes = build_settings()
-    # The app picks win over the Settings list (both name system-file-manager).
+    # The app picks and the gear win over the Settings list (both name
+    # system-file-manager and preferences-system): drop the Settings copy.
     for name, source in WIN11_APPS.items():
         put_svg(find_icon(WIN11, source), "apps", name)
+    for name in [*WIN11_APPS, *GEAR_NAMES]:
+        (OUT / "scalable" / "settings" / f"{name}.svg").unlink(missing_ok=True)
 
     fixed_dirs = []
     for size in SIZES:
@@ -231,6 +239,8 @@ def main() -> None:
             src = YARU / folder / "apps" / "accessories-calculator.png"
             for name in CALCULATOR_NAMES:
                 recolor_blue(src, OUT / folder / "apps" / f"{name}.png", MAC_ORANGE)
+            for name in GEAR_NAMES:
+                shutil.copyfile(YARU_BASE / folder / "apps" / "preferences-system.png", OUT / folder / "apps" / f"{name}.png")
             fixed_dirs.append(f"{folder}/apps")
             places = YARU / folder / "places"
             for name in YARU_FOLDERS:

@@ -16,7 +16,8 @@ to Yaru-blue-kde, then Breeze dark, then the app's own icon.
 |---|---|---|
 | Calculator (KCalc) | Yaru, the blue "=" made orange like the Mac one | Yaru-blue, recoloured |
 | Screenshot (Spectacle) | Scissors, like the Windows Snipping Tool | Win11-dark |
-| File manager (Dolphin) | Yellow File Explorer folder | Win11-dark |
+| File manager (Dolphin) | Open Microsoft yellow folder, no blue bar | Win11-dark |
+| Settings app | Ubuntu gear | Yaru |
 | Folders (Home, Documents, Pictures, ...) | Yaru folders in Windows yellow, symbols in amber | Yaru-blue, recoloured |
 | Kate | Windows Notepad | Win11-dark |
 | KWrite | Yellow notes pad, like Apple Notes | Win11-dark |
