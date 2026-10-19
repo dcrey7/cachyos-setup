@@ -75,6 +75,24 @@ PlasmaCore.ToolTipArea {
     readonly property bool playingAudio: hasAudioStream && audioStreams.some(item => !item.corked)
     readonly property bool muted: hasAudioStream && audioStreams.every(item => item.muted)
 
+    // dock-zoom: only icons in a horizontal panel zoom, not the group popup.
+    readonly property bool zoomable: !inPopup && !tasksRoot.vertical
+        && task.parent?.zoomMax !== undefined
+    readonly property real zoomMax: zoomable ? task.parent.zoomMax : 1
+    readonly property real zoomRest: zoomable ? task.parent.zoomRest : 1
+    // 0..1: 1 right under the mouse, then down to 0 along a cosine curve.
+    readonly property real zoomFactor: {
+        if (!zoomable || task.parent.zoomAmount <= 0) {
+            return 0;
+        }
+        const reach = task.parent.zoomReach;
+        const distance = Math.abs(x + width / 2 - task.parent.zoomX) / Math.max(width, 1);
+        if (distance >= reach) {
+            return 0;
+        }
+        return task.parent.zoomAmount * (0.5 + 0.5 * Math.cos(Math.PI * distance / reach));
+    }
+
     readonly property bool highlighted: (inPopup && activeFocus) || (!inPopup && containsMouse)
         || (task.contextMenu && task.contextMenu.status === PlasmaExtras.Menu.Open)
         || (!!tasksRoot.groupDialog && tasksRoot.groupDialog.visualParent === task)
@@ -566,7 +584,14 @@ PlasmaCore.ToolTipArea {
         Kirigami.Icon {
             id: icon
 
-            anchors.fill: parent
+            // dock-zoom: the icon is drawn at its biggest zoom size, so it is
+            // sharp when zoomed, and scaled down at rest. It stays centred in
+            // the bar and grows from its centre.
+            anchors.centerIn: parent
+            width: parent.width * task.zoomMax
+            height: parent.height * task.zoomMax
+            transformOrigin: Item.Center
+            scale: (task.zoomRest + (task.zoomMax - task.zoomRest) * task.zoomFactor) / task.zoomMax
 
             active: task.highlighted
             enabled: true

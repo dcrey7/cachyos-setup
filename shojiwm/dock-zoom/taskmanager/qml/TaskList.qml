@@ -12,6 +12,8 @@ import org.kde.plasma.core as PlasmaCore
 import plasma.applet.org.kde.plasma.taskmanager as TaskManagerApplet
 
 GridLayout {
+    id: taskListRoot
+
     property bool animating: false
 
     rowSpacing: 0
@@ -59,4 +61,28 @@ GridLayout {
 
     rows: vertical ? orthogonalCount : stripeCount
     columns: vertical ? stripeCount : orthogonalCount
+
+    // dock-zoom: a Mac-style zoom on the icons near the mouse.
+    // Only scale transforms change while the mouse moves (no new layout),
+    // so the GPU does the work. Task.qml reads these values.
+    readonly property real zoomRest: 0.8   // icon size at rest, of its slot
+    readonly property real zoomMax: 1.12   // icon size right under the mouse
+    readonly property real zoomReach: 2.5  // how many icons around it grow
+    // Where the mouse is (kept when it leaves, so the zoom fades in place).
+    property real zoomX: 0
+    // How much zoom is on: eases 0 -> 1 when the mouse comes, back when it goes.
+    property real zoomAmount: zoomHover.hovered && !vertical ? 1 : 0
+    Behavior on zoomAmount {
+        NumberAnimation { duration: 70; easing.type: Easing.OutQuad }
+    }
+    HoverHandler {
+        id: zoomHover
+    }
+    Binding {
+        when: zoomHover.hovered
+        target: taskListRoot
+        property: "zoomX"
+        value: zoomHover.point.position.x
+        restoreMode: Binding.RestoreNone
+    }
 }
