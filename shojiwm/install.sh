@@ -21,12 +21,12 @@ SRC_DIR="${SHOJIWM_SRC_DIR:-$HOME/Downloads/work/ShojiWM}"
 # Our ShojiWM: upstream bea4dev/ShojiWM plus the KDE Plasma work, on our fork.
 FORK_URL="https://github.com/dcrey7/ShojiWM.git"
 # The fork commit this setup is tested with (branch kde-plasma-session).
-FORK_COMMIT="2ccc3b953451e4ce8e3b10724d7202331a782dab"
+FORK_COMMIT="ab0d376e01a662022d3ef3c3cf5d7e99dcfc4202"
 BRANCH="cachyos-shojiwm"
 CONFIG_DIR="$HOME/.config/shojiwm"
 PORTALS_CONF="$HOME/.config/xdg-desktop-portal/shojiwm-portals.conf"
 
-echo "==> 1/6  Packages ShojiWM needs (seat access, lock screen, idle lock)"
+echo "==> 1/7  Packages ShojiWM needs (seat access, lock screen, idle lock)"
 sudo pacman -S --needed seatd hyprlock swayidle python-gobject python-pyqt6 grim xdg-desktop-portal-kde
 
 if ! command -v cargo >/dev/null 2>&1; then
@@ -35,7 +35,7 @@ if ! command -v cargo >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "==> 2/6  ShojiWM source at $SRC_DIR (fork commit ${FORK_COMMIT:0:7})"
+echo "==> 2/7  ShojiWM source at $SRC_DIR (fork commit ${FORK_COMMIT:0:7})"
 if [[ ! -d "$SRC_DIR/.git" ]]; then
     git clone "$FORK_URL" "$SRC_DIR"
 fi
@@ -50,7 +50,7 @@ else
     git -C "$SRC_DIR" switch -c "$BRANCH" "$FORK_COMMIT"
 fi
 
-echo "==> 3/6  Build and install ShojiWM (cargo build, then sudo install)"
+echo "==> 3/7  Build and install ShojiWM (cargo build, then sudo install)"
 # dist/install.sh keeps an existing ~/.config/shojiwm; step 4 updates it.
 (cd "$SRC_DIR" && ./dist/install.sh)
 
@@ -68,14 +68,14 @@ org.freedesktop.impl.portal.AppChooser=kde
 EOF
 systemctl --user restart xdg-desktop-portal || true
 
-echo "==> 4/6  ShojiWM config -> $CONFIG_DIR/src (old one backed up)"
+echo "==> 4/7  ShojiWM config -> $CONFIG_DIR/src (old one backed up)"
 if [[ -d "$CONFIG_DIR/src" ]]; then
     cp -a "$CONFIG_DIR/src" "$CONFIG_DIR/src.backup-$(date +%Y%m%d-%H%M%S)"
 fi
 mkdir -p "$CONFIG_DIR/src"
 cp -a "$SRC_DIR/packages/config/src/." "$CONFIG_DIR/src/"
 
-echo "==> 5/6  Lock screen (hyprlock) config"
+echo "==> 5/7  Lock screen (hyprlock) config"
 mkdir -p "$HOME/.config/hypr"
 if [[ -f "$HOME/.config/hypr/hyprlock.conf" ]]; then
     echo "    keeping your existing ~/.config/hypr/hyprlock.conf"
@@ -83,12 +83,20 @@ else
     cp "$HERE/lockscreen/hyprlock.conf" "$HOME/.config/hypr/hyprlock.conf"
 fi
 
-echo "==> 6/6  Workspace circles widget (also installed by the main install.sh)"
+echo "==> 6/7  Workspace circles widget (also installed by the main install.sh)"
 PLASMOID_DEST="$HOME/.local/share/plasma/plasmoids/cachyos.workspace-indicator"
 rm -rf "$PLASMOID_DEST"
 mkdir -p "$(dirname "$PLASMOID_DEST")"
 cp -r "$REPO_ROOT/assets/plasmoids/cachyos-workspace-indicator" "$PLASMOID_DEST"
 chmod +x "$PLASMOID_DEST/contents/code/switch.sh"
+
+echo "==> 7/7  Icons: shoji-picks (Mac calculator, Windows snip, yellow folders, Win11 settings)"
+# Built by shojiwm/icons/build.py. It falls back to Yaru-blue-kde, then Breeze.
+ICON_DEST="$HOME/.local/share/icons/shoji-picks"
+rm -rf "$ICON_DEST"
+mkdir -p "$(dirname "$ICON_DEST")"
+cp -r "$HERE/icons/shoji-picks" "$ICON_DEST"
+/usr/lib/plasma-changeicons shoji-picks || true
 
 echo
 echo "Done. Log out and pick ShojiWM at the login screen."
