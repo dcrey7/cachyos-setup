@@ -23,6 +23,28 @@ to Yaru-blue-kde, then Breeze dark, then the app's own icon.
 | Kate | Windows Notepad | Win11-dark |
 | KWrite | Yellow notes pad, like Apple Notes | Win11-dark |
 | System Settings pages | Win11; Breeze where Win11 repeats an icon | Win11-dark, breeze-dark |
+| Start menu categories | One full-colour icon each, none repeated (the menu asks for thin grey "-symbolic" icons) | see below |
+
+Start menu categories:
+
+| Category | Icon | Source |
+|---|---|---|
+| Favourites | Folder with a star | Win11-dark |
+| All Applications | Purple grid | Win11-dark |
+| Development | Code window `</>` | Win11-dark |
+| Education | Graduation cap | Win11-dark |
+| Games | Game controller | Win11-dark |
+| Graphics | Paint palette | Win11-dark |
+| Internet | Globe (Win11 has the Edge logo) | breeze-dark |
+| Multimedia | Purple play button | Yaru |
+| Office | Document (Win11 has the Office logo) | breeze-dark |
+| Science | Flask (Win11 has a light bulb) | breeze-dark |
+| Settings | Ubuntu gear, like the Settings app | Yaru |
+| System | Monitor | Win11-dark |
+| Utilities | Red toolbox | breeze-dark |
+| Help | Blue "i" | breeze-dark |
+| Other | Speech bubble "..." | breeze-dark |
+| Network | Network monitor (the globe is Internet) | Win11-dark |
 
 VS Code, Chrome, OBS and the terminal keep the icons they have now.
 

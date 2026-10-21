@@ -57,8 +57,32 @@ TRASH_PICKS = {
     "trash-empty": "user-trash",
 }
 
-# The Settings app keeps the Ubuntu (Yaru) gear.
-GEAR_NAMES = ["preferences-system", "systemsettings", "org.kde.systemsettings"]
+# The Settings app keeps the Ubuntu (Yaru) gear. The start menu's Settings
+# category (preferences-system-symbolic) gets it too.
+GEAR_NAMES = ["preferences-system", "systemsettings", "org.kde.systemsettings", "preferences-system-symbolic"]
+
+# The start menu sidebar: one full-colour icon per category, none repeated.
+# The menu asks for the "-symbolic" names (thin grey lines on a dark menu).
+# Win11 where its icon is clear and not a brand logo; Breeze otherwise.
+CATEGORY_PICKS = {
+    "bookmarks": (WIN11, "bookmarks"),  # Favourites
+    "applications-all-symbolic": (WIN11, "applications-all"),
+    "applications-development-symbolic": (WIN11, "applications-development"),
+    "applications-education-symbolic": (WIN11, "applications-education"),
+    "applications-games-symbolic": (WIN11, "applications-games"),
+    "applications-graphics-symbolic": (WIN11, "applications-graphics"),
+    "applications-internet-symbolic": (BREEZE, "applications-internet"),  # Win11: Edge logo
+    "applications-office-symbolic": (BREEZE, "applications-office"),  # Win11: Office logo
+    "applications-science-symbolic": (BREEZE, "applications-science"),  # Win11: light bulb
+    "applications-system-symbolic": (WIN11, "applications-system"),
+    "applications-utilities-symbolic": (BREEZE, "applications-utilities"),
+    "help-about-symbolic": (BREEZE, "help-about"),
+    "applications-other-symbolic": (BREEZE, "applications-other"),
+    "applications-network-symbolic": (WIN11, "preferences-system-network"),  # globe is Internet
+}
+# Multimedia: the Yaru purple play button (PNG, copied per size like the
+# gear). Win11 has a dark speaker, Breeze a monitor like System and Network.
+MULTIMEDIA_NAMES = ["applications-multimedia-symbolic"]
 
 # The icons of the System Settings pages and groups (from the KCM plugins).
 # The "-symbolic" ones stay Breeze: they are one-colour line icons that the
@@ -215,7 +239,7 @@ def write_index(dirs: list[str]) -> None:
         f"Directories={','.join(dirs)}",
         "",
     ]
-    contexts = {"apps": "Applications", "places": "Places", "settings": "Applications"}
+    contexts = {"apps": "Applications", "places": "Places", "settings": "Applications", "categories": "Categories"}
     for d in dirs:
         lines.append(f"[{d}]")
         lines.append(f"Context={contexts[d.split('/')[-1]]}")
@@ -240,7 +264,9 @@ def main() -> None:
         put_svg(find_icon(WIN11, source), "apps", name)
     for name, source in TRASH_PICKS.items():
         put_svg(find_icon(WIN11, source), "apps", name)
-    for name in [*WIN11_APPS, *TRASH_PICKS, *GEAR_NAMES]:
+    for name, (theme, source) in CATEGORY_PICKS.items():
+        put_svg(find_icon(theme, source), "categories", name)
+    for name in [*WIN11_APPS, *TRASH_PICKS, *GEAR_NAMES, *CATEGORY_PICKS, *MULTIMEDIA_NAMES]:
         (OUT / "scalable" / "settings" / f"{name}.svg").unlink(missing_ok=True)
 
     fixed_dirs = []
@@ -251,6 +277,8 @@ def main() -> None:
                 recolor_blue(src, OUT / folder / "apps" / f"{name}.png", MAC_ORANGE)
             for name in GEAR_NAMES:
                 shutil.copyfile(YARU_BASE / folder / "apps" / "preferences-system.png", OUT / folder / "apps" / f"{name}.png")
+            for name in MULTIMEDIA_NAMES:
+                shutil.copyfile(YARU_BASE / folder / "apps" / "applications-multimedia.png", OUT / folder / "apps" / f"{name}.png")
             fixed_dirs.append(f"{folder}/apps")
             places = YARU / folder / "places"
             for name in YARU_FOLDERS:
@@ -261,7 +289,7 @@ def main() -> None:
                     recolor_blue(places / f"{name}.png", OUT / folder / "places" / f"{alias}.png", WINDOWS_YELLOW, FOLDER_DARK_PART)
             fixed_dirs.append(f"{folder}/places")
 
-    write_index(fixed_dirs + ["scalable/apps", "scalable/settings"])
+    write_index(fixed_dirs + ["scalable/apps", "scalable/settings", "scalable/categories"])
     count = sum(1 for p in OUT.rglob("*") if p.is_file())
     print(f"built {OUT} ({count} files)")
     for note in notes:

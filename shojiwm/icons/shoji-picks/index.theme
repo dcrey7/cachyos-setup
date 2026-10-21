@@ -2,7 +2,7 @@
 Name=shoji-picks
 Comment=Hand-picked icons (Mac calculator, Windows snip, yellow folders, Win11 settings) on Yaru
 Inherits=Yaru-blue-kde,breeze-dark,breeze,hicolor
-Directories=16x16/apps,16x16/places,16x16@2x/apps,16x16@2x/places,24x24/apps,24x24/places,24x24@2x/apps,24x24@2x/places,32x32/apps,32x32/places,32x32@2x/apps,32x32@2x/places,48x48/apps,48x48/places,48x48@2x/apps,48x48@2x/places,256x256/apps,256x256/places,256x256@2x/apps,256x256@2x/places,scalable/apps,scalable/settings
+Directories=16x16/apps,16x16/places,16x16@2x/apps,16x16@2x/places,24x24/apps,24x24/places,24x24@2x/apps,24x24@2x/places,32x32/apps,32x32/places,32x32@2x/apps,32x32@2x/places,48x48/apps,48x48/places,48x48@2x/apps,48x48@2x/places,256x256/apps,256x256/places,256x256@2x/apps,256x256@2x/places,scalable/apps,scalable/settings,scalable/categories
 
 [16x16/apps]
 Context=Applications
@@ -123,6 +123,13 @@ Type=Scalable
 
 [scalable/settings]
 Context=Applications
+Size=256
+MinSize=8
+MaxSize=512
+Type=Scalable
+
+[scalable/categories]
+Context=Categories
 Size=256
 MinSize=8
 MaxSize=512
